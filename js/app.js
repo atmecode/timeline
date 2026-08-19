@@ -80,6 +80,7 @@ class App {
             gpsFilter: document.getElementById('gps-filter'),
             cameraMode: document.getElementById('camera-mode'),
             compression: document.getElementById('compression'),
+            aspectRatio: document.getElementById('aspect-ratio'),
             
             // Buttons
             previewBtn: document.getElementById('preview-btn'),
@@ -602,7 +603,9 @@ class App {
             };
             
             // Export video
-            const dimensions = this.memoryManager.getResolutionDimensions();
+            const quality = this.elements.resolution.value;
+            const aspectRatio = this.elements.aspectRatio.value;
+            const dimensions = this.memoryManager.getResolutionDimensions(quality, aspectRatio);
             const videoBlob = await this.exporter.export(frameRenderer, {
                 width: dimensions.width,
                 height: dimensions.height,

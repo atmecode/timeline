@@ -234,24 +234,47 @@ class MemoryManager {
     }
 
     /**
-     * Get optimal resolution dimensions
+     * Get resolution dimensions based on quality and aspect ratio
+     * @param {string} quality - '480p', '720p', '1080p'
+     * @param {string} aspectRatio - '1:1', '16:9', '9:16', '4:3', '21:9'
      */
-    getResolutionDimensions() {
-        const resolutions = {
-            '1080p': { width: 1920, height: 1080 },
-            '720p': { width: 1280, height: 720 },
-            '480p': { width: 854, height: 480 }
+    getResolutionDimensions(quality = '720p', aspectRatio = '16:9') {
+        // Aspect ratio as width/height multiplier
+        const ratios = {
+            '1:1':  { w: 1, h: 1 },
+            '16:9': { w: 16, h: 9 },
+            '9:16': { w: 9, h: 16 },
+            '4:3':  { w: 4, h: 3 },
+            '21:9': { w: 21, h: 9 }
         };
-        
-        // Force lower resolution if memory is tight
-        this.checkMemory().then(status => {
-            if (status.isWarning) {
-                console.warn('Memory warning, forcing 480p');
-                return resolutions['480p'];
-            }
-        });
-        
-        return resolutions[this.config.resolution];
+
+        // Base resolution (longest side)
+        const baseSizes = {
+            '480p':  480,
+            '720p':  720,
+            '1080p': 1080
+        };
+
+        const base = baseSizes[quality] || 720;
+        const ratio = ratios[aspectRatio] || ratios['16:9'];
+
+        // Calculate dimensions so longest side = base
+        let width, height;
+        if (ratio.w >= ratio.h) {
+            // Landscape or square
+            width = Math.round(base * ratio.w / Math.max(ratio.w, ratio.h));
+            height = Math.round(base * ratio.h / Math.max(ratio.w, ratio.h));
+        } else {
+            // Portrait
+            width = Math.round(base * ratio.w / Math.max(ratio.w, ratio.h));
+            height = Math.round(base * ratio.h / Math.max(ratio.w, ratio.h));
+        }
+
+        // Ensure even numbers (required by most codecs)
+        width = Math.round(width / 2) * 2;
+        height = Math.round(height / 2) * 2;
+
+        return { width, height };
     }
 
     /**
