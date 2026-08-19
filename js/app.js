@@ -4,7 +4,7 @@
  */
 class App {
     // Version info
-    static VERSION = '1.4.1';
+    static VERSION = '2.0.0';
     static BUILD_DATE = '2025-08-20';
     
     constructor() {
@@ -78,6 +78,8 @@ class App {
             resolution: document.getElementById('resolution'),
             title: document.getElementById('title'),
             gpsFilter: document.getElementById('gps-filter'),
+            cameraMode: document.getElementById('camera-mode'),
+            compression: document.getElementById('compression'),
             
             // Buttons
             previewBtn: document.getElementById('preview-btn'),
@@ -451,10 +453,11 @@ class App {
         
         // Get settings
         const duration = parseInt(this.elements.duration.value);
-        const resolution = this.elements.resolution.value;
+        const cameraMode = this.elements.cameraMode.value;
+        const compression = this.elements.compression.value;
         
-        // Set animation data
-        this.animation.setData(this.parsedPoints, duration);
+        // Set animation data with camera mode and compression
+        this.animation.setData(this.parsedPoints, duration, cameraMode, compression);
         
         // Show playback section
         this.elements.playbackSection.style.display = 'block';
@@ -558,9 +561,11 @@ class App {
         const duration = parseInt(this.elements.duration.value);
         const resolution = this.elements.resolution.value;
         const title = this.elements.title.value || 'timeline-video';
+        const cameraMode = this.elements.cameraMode.value;
+        const compression = this.elements.compression.value;
         
-        // Set animation data (without playing)
-        this.animation.setData(this.parsedPoints, duration);
+        // Set animation data with camera mode and compression
+        this.animation.setData(this.parsedPoints, duration, cameraMode, compression);
         
         // Show progress
         this.showProgress('Preparing video export...');
@@ -571,8 +576,15 @@ class App {
                 // Update animation to frame position
                 this.animation.seek(progress);
                 
-                // Render frame directly to canvas
-                this.mapRenderer.renderToCanvas(ctx, width, height, this.parsedPoints, progress);
+                // Render frame directly to canvas using pre-calculated data
+                this.mapRenderer.renderToCanvas(
+                    ctx, width, height,
+                    this.parsedPoints,
+                    this.animation.framePoints,
+                    this.animation.camCenters,
+                    this.animation.camSpans,
+                    progress
+                );
             };
             
             // Set up progress callback

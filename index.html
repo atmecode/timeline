@@ -94,6 +94,27 @@
                     <input type="text" id="title" class="input" placeholder="My Travel 2024">
                 </div>
 
+                <!-- Camera Mode -->
+                <div class="setting-group">
+                    <label for="camera-mode">🎥 Camera Mode</label>
+                    <select id="camera-mode" class="select">
+                        <option value="steady" selected>Steady (Smooth)</option>
+                        <option value="dynamic">Dynamic (Follows closely)</option>
+                        <option value="fixed">Fixed (Static zoom)</option>
+                    </select>
+                </div>
+
+                <!-- Compression -->
+                <div class="setting-group">
+                    <label for="compression">⚡ Trip Compression</label>
+                    <select id="compression" class="select">
+                        <option value="off">Off (Linear)</option>
+                        <option value="gentle">Gentle</option>
+                        <option value="balanced" selected>Balanced</option>
+                        <option value="strong">Strong</option>
+                    </select>
+                </div>
+
                 <!-- GPS Filter -->
                 <div class="setting-group">
                     <label>
@@ -113,6 +134,8 @@
                 </button>
             </div>
             <p class="action-hint">💡 Preview shows animation on map. Export creates WebM video.</p>
+            <p class="action-hint">🎥 Steady: smooth camera | Dynamic: follows closely | Fixed: static zoom</p>
+            <p class="action-hint">⚡ Compression speeds up long trips for better timing</p>
         </section>
 
         <!-- Map Section -->
@@ -188,6 +211,7 @@
             crossorigin=""></script>
     
     <!-- Application Scripts -->
+    <script src="js/engine-config.js"></script>
     <script src="js/device-detector.js"></script>
     <script src="js/memory-manager.js"></script>
     <script src="js/timeline-parser.js"></script>

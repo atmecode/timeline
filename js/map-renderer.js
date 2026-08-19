@@ -1,47 +1,39 @@
 /**
  * Map Renderer Module
- * Renders timeline data on Leaflet.js map
+ * Ported from mahlernim/google-timeline-visualizer Python original
+ * 
+ * Features:
+ * - Camera modes: fixed, steady, dynamic
+ * - Camera dead zone for smooth following
+ * - Distance-based tail effect (500km)
+ * - Gradient trail opacity
  */
 class MapRenderer {
     constructor(containerId) {
         this.containerId = containerId;
         this.map = null;
+        this.tileLayer = null;
         this.routeLayer = null;
         this.marker = null;
-        this.fadedRoute = null;
-        this.tileLayer = null;
-        
+
         // CARTO tiles (same as Python version)
-        this.tileUrl = 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png';
+        this.tileUrl = ENGINE_CONFIG.TILE_URL;
         this.tileAttribution = '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, © <a href="https://carto.com/attributions">CARTO</a>';
-        
-        // Route styling
-        this.routeStyle = {
-            color: '#ff0055',
-            weight: 4,
-            opacity: 0.9,
-            lineCap: 'round',
-            lineJoin: 'round'
-        };
-        
-        this.fadedStyle = {
-            color: '#ff0055',
-            weight: 3,
-            opacity: 0.3,
-            lineCap: 'round',
-            lineJoin: 'round'
-        };
-        
-        // Marker styling
-        this.markerRadius = 10;
-        this.markerColor = '#ff0055';
+
+        // Route data
+        this.routePoints = [];
+        this.framePoints = [];
+        this.camCenters = [];
+        this.camSpans = [];
+
+        // Tail config (same as Python)
+        this.tailKm = ENGINE_CONFIG.DEFAULT_TAIL_KM;
     }
 
     /**
-     * Initialize the map
+     * Initialize the Leaflet map
      */
     init() {
-        // Create map instance
         this.map = L.map(this.containerId, {
             center: [0, 0],
             zoom: 2,
@@ -49,27 +41,20 @@ class MapRenderer {
             attributionControl: true
         });
 
-        // Add tile layer
         this.tileLayer = L.tileLayer(this.tileUrl, {
             attribution: this.tileAttribution,
             maxZoom: 19,
             subdomains: 'abcd'
         }).addTo(this.map);
 
-        // Initialize route layers
         this.routeLayer = L.layerGroup().addTo(this.map);
-        this.fadedRoute = L.layerGroup().addTo(this.map);
+        this.marker = this.createMarker();
 
-        // Create animated marker
-        this.createMarker();
-
-        // Fit bounds to world view
         this.map.fitBounds([[-60, -180], [80, 180]]);
 
-        // Force map to recalculate size (important for hidden containers)
         setTimeout(() => {
             this.map.invalidateSize();
-            console.log('Map initialized and resized');
+            console.log('Map initialized');
         }, 100);
     }
 
@@ -77,262 +62,283 @@ class MapRenderer {
      * Create the animated marker
      */
     createMarker() {
-        const markerIcon = L.divIcon({
+        const icon = L.divIcon({
             className: 'custom-marker',
             html: `<div style="
-                width: ${this.markerRadius * 2}px;
-                height: ${this.markerRadius * 2}px;
-                background: ${this.markerColor};
+                width: 16px;
+                height: 16px;
+                background: ${ENGINE_CONFIG.THEME_COLOR};
                 border: 3px solid white;
                 border-radius: 50%;
-                box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+                box-shadow: 0 2px 10px rgba(0,0,0,0.4);
             "></div>`,
-            iconSize: [this.markerRadius * 2, this.markerRadius * 2],
-            iconAnchor: [this.markerRadius, this.markerRadius]
+            iconSize: [16, 16],
+            iconAnchor: [8, 8]
         });
 
-        this.marker = L.marker([0, 0], { icon: markerIcon });
+        return L.marker([0, 0], { icon });
     }
 
     /**
-     * Initialize route (prepare for animation, don't draw yet)
+     * Initialize route (prepare for animation)
      */
     initRoute(points, options = {}) {
         const { fitBounds = true } = options;
-
-        // Clear existing route
-        this.clearRoute();
-
-        if (points.length === 0) return;
-
-        // Store points for progressive drawing
+        this.routeLayer.clearLayers();
         this.routePoints = points;
 
-        // Fit map to route bounds
-        if (fitBounds) {
+        if (fitBounds && points.length > 0) {
             const latLngs = points.map(p => [p.lat, p.lon]);
-            const bounds = L.latLngBounds(latLngs);
-            this.map.fitBounds(bounds, { padding: [50, 50] });
+            this.map.fitBounds(L.latLngBounds(latLngs), { padding: [50, 50] });
         }
 
-        // Add marker at start (hidden initially)
-        this.marker.setLatLng([points[0].lat, points[0].lon]);
-        this.marker.addTo(this.map);
+        // Add marker at start
+        if (points.length > 0) {
+            this.marker.setLatLng([points[0].lat, points[0].lon]);
+            this.marker.addTo(this.map);
+        }
 
-        console.log(`Route initialized with ${points.length} points`);
+        console.log(`Route initialized: ${points.length} points`);
     }
 
     /**
-     * Draw route progressively up to current progress
-     * @param {number} progress - 0 to 1
-     * @param {Array} points - All route points
+     * Update map from pre-calculated animation data
+     * Called by AnimationEngine with camera positions
      */
-    drawRouteProgress(progress, points) {
-        if (!points || points.length === 0) return;
+    updateProgress(progress, routePoints, framePoints, camCenters, camSpans) {
+        if (!framePoints || framePoints.length === 0) return;
 
-        // Clear previous route
+        // Store for video export
+        this.routePoints = routePoints;
+        this.framePoints = framePoints;
+        this.camCenters = camCenters;
+        this.camSpans = camSpans;
+
+        // Get current frame index
+        const frameIndex = Math.floor(progress * (framePoints.length - 1));
+
+        // Apply camera from track (dead zone already applied)
+        if (camCenters && camCenters[frameIndex]) {
+            const cam = camCenters[frameIndex];
+            const span = camSpans[frameIndex];
+
+            // Convert Web Mercator meters back to lat/lon for Leaflet
+            const centerLL = Projection.metersToLatlon(cam.x, cam.y);
+            const halfSpanDeg = (span / ENGINE_CONFIG.R_EARTH) * (180 / Math.PI);
+
+            this.map.setView(
+                [centerLL.lat, centerLL.lon],
+                this.map.getZoom(),
+                { animate: false }
+            );
+
+            // Set bounds to match span
+            const bounds = L.latLngBounds(
+                [centerLL.lat - halfSpanDeg, centerLL.lon - halfSpanDeg],
+                [centerLL.lat + halfSpanDeg, centerLL.lon + halfSpanDeg]
+            );
+            this.map.fitBounds(bounds, { animate: false, padding: [0, 0] });
+        }
+
+        // Draw progressive route
+        this.drawProgressiveRoute(progress, routePoints, framePoints, frameIndex);
+
+        // Update marker
+        if (framePoints[frameIndex]) {
+            const markerLL = Projection.metersToLatlon(framePoints[frameIndex].x, framePoints[frameIndex].y);
+            this.marker.setLatLng([markerLL.lat, markerLL.lon]);
+            this.marker.addTo(this.map);
+        }
+    }
+
+    /**
+     * Draw route progressively (like Python original)
+     * Shows full route in faded + tail in bright
+     */
+    drawProgressiveRoute(progress, routePoints, framePoints, frameIndex) {
         this.routeLayer.clearLayers();
-        this.fadedRoute.clearLayers();
 
-        const currentIndex = Math.floor(progress * (points.length - 1));
-        
-        if (currentIndex <= 0) return;
+        if (!routePoints || routePoints.length === 0 || frameIndex <= 0) return;
 
-        // Draw trail (faded route behind marker)
-        const trailPoints = points.slice(0, currentIndex + 1).map(p => [p.lat, p.lon]);
-        
-        // Create gradient effect
-        const segmentSize = Math.max(1, Math.floor(trailPoints.length / 10));
-        
-        for (let i = 0; i < trailPoints.length - 1; i += segmentSize) {
-            const end = Math.min(i + segmentSize + 1, trailPoints.length);
-            const segment = trailPoints.slice(i, end);
-            
-            if (segment.length < 2) continue;
-            
-            // Newer segments are more opaque
-            const segmentProgress = i / trailPoints.length;
-            const opacity = 0.2 + (segmentProgress * 0.6);
-            
-            const polyline = L.polyline(segment, {
-                color: '#ff0055',
-                weight: 3,
-                opacity: opacity,
+        const currentMeter = framePoints[frameIndex];
+
+        // 1. Draw FULL route (very faded, like Python path_line alpha=0.5)
+        const allLatLngs = routePoints.map(p => [p.lat, p.lon]);
+        if (allLatLngs.length > 1) {
+            const fullPath = L.polyline(allLatLngs, {
+                color: ENGINE_CONFIG.THEME_COLOR,
+                weight: 2,
+                opacity: 0.3,
                 lineCap: 'round',
                 lineJoin: 'round'
             });
-            
-            this.routeLayer.addLayer(polyline);
+            this.routeLayer.addLayer(fullPath);
         }
 
-        // Draw current position marker
-        if (currentIndex < points.length) {
-            const currentPoint = points[currentIndex];
-            this.marker.setLatLng([currentPoint.lat, currentPoint.lon]);
+        // 2. Draw TAIL (bright, distance-based ~500km like Python DEFAULT_TAIL_KM)
+        // Calculate total distance traveled
+        let currentDistKm = 0;
+        for (let i = 1; i <= frameIndex && i < routePoints.length; i++) {
+            currentDistKm += Projection.haversineDistance(
+                routePoints[i - 1].lat, routePoints[i - 1].lon,
+                routePoints[i].lat, routePoints[i].lon
+            );
+        }
+
+        // Find tail start (500km behind)
+        const tailStartKm = Math.max(0, currentDistKm - this.tailKm);
+        let accumulated = 0;
+        let tailStartIndex = 0;
+        for (let i = 1; i < routePoints.length && i <= frameIndex; i++) {
+            accumulated += Projection.haversineDistance(
+                routePoints[i - 1].lat, routePoints[i - 1].lon,
+                routePoints[i].lat, routePoints[i].lon
+            );
+            if (accumulated >= tailStartKm) {
+                tailStartIndex = i - 1;
+                break;
+            }
+        }
+
+        // Draw tail segments with gradient opacity
+        const tailLatLngs = [];
+        for (let i = tailStartIndex; i <= frameIndex && i < routePoints.length; i++) {
+            tailLatLngs.push([routePoints[i].lat, routePoints[i].lon]);
+        }
+
+        // Add current interpolated position
+        if (currentMeter) {
+            const currentLL = Projection.metersToLatlon(currentMeter.x, currentMeter.y);
+            tailLatLngs.push([currentLL.lat, currentLL.lon]);
+        }
+
+        if (tailLatLngs.length > 1) {
+            // Draw as gradient segments (newer = more opaque)
+            const segSize = Math.max(1, Math.floor(tailLatLngs.length / 8));
+            for (let i = 0; i < tailLatLngs.length - 1; i += segSize) {
+                const end = Math.min(i + segSize + 1, tailLatLngs.length);
+                const segment = tailLatLngs.slice(i, end);
+                if (segment.length < 2) continue;
+
+                const segProgress = i / tailLatLngs.length;
+                const opacity = 0.4 + (segProgress * 0.6);
+
+                const tailSeg = L.polyline(segment, {
+                    color: ENGINE_CONFIG.THEME_COLOR,
+                    weight: 4,
+                    opacity: opacity,
+                    lineCap: 'round',
+                    lineJoin: 'round'
+                });
+                this.routeLayer.addLayer(tailSeg);
+            }
         }
     }
 
     /**
-     * Update route animation progress (progressive drawing)
-     * @param {number} progress - Progress from 0 to 1
-     * @param {Array} points - All route points
+     * Render to canvas for video export
      */
-    updateProgress(progress, points) {
-        if (!points || points.length === 0) return;
-
-        // Draw route progressively
-        this.drawRouteProgress(progress, points);
-
-        // Update camera to follow marker
-        const index = Math.floor(progress * (points.length - 1));
-        if (index < points.length) {
-            this.followMarker(points[index]);
-        }
-    }
-
-    /**
-     * Follow marker with camera
-     */
-    followMarker(point) {
-        const currentCenter = this.map.getCenter();
-        const targetLatLng = L.latLng(point.lat, point.lon);
-        
-        // Smooth camera movement
-        const easeFactor = 0.1;
-        const newLat = currentCenter.lat + (targetLatLng.lat - currentCenter.lat) * easeFactor;
-        const newLng = currentCenter.lng + (targetLatLng.lng - currentCenter.lng) * easeFactor;
-        
-        this.map.setView([newLat, newLng], this.map.getZoom(), {
-            animate: false
-        });
-    }
-
-    /**
-     * Set camera to follow mode with auto-zoom
-     */
-    setFollowMode(enabled, points) {
-        if (!enabled) return;
-
-        // Calculate appropriate zoom level based on route extent
-        if (points && points.length > 0) {
-            const bounds = L.latLngBounds(points.map(p => [p.lat, p.lon]));
-            this.map.fitBounds(bounds, { padding: [100, 100] });
-        }
-    }
-
-    /**
-     * Clear all route layers
-     */
-    clearRoute() {
-        this.routeLayer.clearLayers();
-        this.fadedRoute.clearLayers();
-        this.marker.remove();
-    }
-
-    /**
-     * Reset map view
-     */
-    resetView() {
-        this.clearRoute();
-        this.map.setView([0, 0], 2);
-    }
-
-    /**
-     * Render current map state to canvas context
-     * This is used for video export - draws directly to canvas
-     */
-    renderToCanvas(ctx, width, height, points, progress) {
-        // Draw background
+    renderToCanvas(ctx, width, height, routePoints, framePoints, camCenters, camSpans, progress) {
         ctx.fillStyle = '#1a1a2e';
         ctx.fillRect(0, 0, width, height);
-        
-        // Get current map state
-        const bounds = this.map.getBounds();
-        const zoom = this.map.getZoom();
-        
-        // Calculate map projection
-        const latSpan = bounds.getNorth() - bounds.getSouth();
-        const lngSpan = bounds.getEast() - bounds.getWest();
-        
-        // Draw route if we have points
-        if (points && points.length > 0 && progress > 0) {
-            const currentIndex = Math.floor(progress * (points.length - 1));
-            
-            // Draw route path
+
+        if (!framePoints || framePoints.length === 0 || !camCenters || camCenters.length === 0) return;
+
+        const frameIndex = Math.floor(progress * (framePoints.length - 1));
+        const cam = camCenters[frameIndex];
+        if (!cam) return;
+
+        const span = camSpans[frameIndex];
+        const halfSpanM = span / 2;
+
+        // Convert route to canvas coordinates
+        const routeToCanvas = (meterX, meterY) => {
+            const x = ((meterX - (cam.x - halfSpanM)) / span) * width;
+            const y = (((cam.y + halfSpanM) - meterY) / span) * height;
+            return { x, y };
+        };
+
+        // Draw full route (faded)
+        if (routePoints && routePoints.length > 1) {
             ctx.beginPath();
-            ctx.strokeStyle = '#ff0055';
-            ctx.lineWidth = 3;
-            ctx.lineCap = 'round';
-            ctx.lineJoin = 'round';
-            
-            for (let i = 0; i <= currentIndex && i < points.length; i++) {
-                const x = ((points[i].lon - bounds.getWest()) / lngSpan) * width;
-                const y = ((bounds.getNorth() - points[i].lat) / latSpan) * height;
-                
-                if (i === 0) {
-                    ctx.moveTo(x, y);
-                } else {
-                    ctx.lineTo(x, y);
-                }
+            ctx.strokeStyle = 'rgba(255, 0, 85, 0.3)';
+            ctx.lineWidth = 2;
+
+            for (let i = 0; i < routePoints.length; i++) {
+                const m = Projection.latlonToMeters(routePoints[i].lat, routePoints[i].lon);
+                const p = routeToCanvas(m.x, m.y);
+                if (i === 0) ctx.moveTo(p.x, p.y);
+                else ctx.lineTo(p.x, p.y);
             }
             ctx.stroke();
-            
-            // Draw current position marker
-            if (currentIndex < points.length) {
-                const currentPoint = points[currentIndex];
-                const markerX = ((currentPoint.lon - bounds.getWest()) / lngSpan) * width;
-                const markerY = ((bounds.getNorth() - currentPoint.lat) / latSpan) * height;
-                
-                // Draw marker circle
-                ctx.beginPath();
-                ctx.arc(markerX, markerY, 8, 0, Math.PI * 2);
-                ctx.fillStyle = '#ff0055';
-                ctx.fill();
-                ctx.strokeStyle = 'white';
-                ctx.lineWidth = 3;
-                ctx.stroke();
+        }
+
+        // Draw tail (bright)
+        let currentDistKm = 0;
+        for (let i = 1; i <= frameIndex && i < routePoints.length; i++) {
+            currentDistKm += Projection.haversineDistance(
+                routePoints[i - 1].lat, routePoints[i - 1].lon,
+                routePoints[i].lat, routePoints[i].lon
+            );
+        }
+
+        const tailStartKm = Math.max(0, currentDistKm - this.tailKm);
+        let accumulated = 0;
+        let tailStartIdx = 0;
+        for (let i = 1; i < routePoints.length && i <= frameIndex; i++) {
+            accumulated += Projection.haversineDistance(
+                routePoints[i - 1].lat, routePoints[i - 1].lon,
+                routePoints[i].lat, routePoints[i].lon
+            );
+            if (accumulated >= tailStartKm) {
+                tailStartIdx = i - 1;
+                break;
             }
-            
-            // Draw progress info
-            ctx.fillStyle = 'white';
-            ctx.font = '14px Arial';
-            ctx.fillText(`${Math.round(progress * 100)}%`, 10, height - 10);
         }
-        
-        // Draw title
+
+        // Draw tail gradient
+        const tailCount = frameIndex - tailStartIdx + 1;
+        for (let i = tailStartIdx; i <= frameIndex && i < routePoints.length - 1; i++) {
+            const m1 = Projection.latlonToMeters(routePoints[i].lat, routePoints[i].lon);
+            const m2 = Projection.latlonToMeters(routePoints[i + 1].lat, routePoints[i + 1].lon);
+            const p1 = routeToCanvas(m1.x, m1.y);
+            const p2 = routeToCanvas(m2.x, m2.y);
+
+            const segProgress = (i - tailStartIdx) / tailCount;
+            const alpha = 0.4 + (segProgress * 0.6);
+
+            ctx.beginPath();
+            ctx.strokeStyle = `rgba(255, 0, 85, ${alpha})`;
+            ctx.lineWidth = 4;
+            ctx.lineCap = 'round';
+            ctx.moveTo(p1.x, p1.y);
+            ctx.lineTo(p2.x, p2.y);
+            ctx.stroke();
+        }
+
+        // Draw marker
+        if (framePoints[frameIndex]) {
+            const mp = routeToCanvas(framePoints[frameIndex].x, framePoints[frameIndex].y);
+
+            ctx.beginPath();
+            ctx.arc(mp.x, mp.y, 8, 0, Math.PI * 2);
+            ctx.fillStyle = ENGINE_CONFIG.THEME_COLOR;
+            ctx.fill();
+            ctx.strokeStyle = 'white';
+            ctx.lineWidth = 3;
+            ctx.stroke();
+        }
+
+        // Draw info
         ctx.fillStyle = 'white';
-        ctx.font = 'bold 16px Arial';
+        ctx.font = 'bold 14px Arial';
         ctx.fillText('Timeline Visualizer', 10, 25);
+        ctx.font = '12px Arial';
+        ctx.fillText(`${Math.round(progress * 100)}%`, 10, height - 10);
     }
 
-    /**
-     * Get map bounds
-     */
-    getBounds() {
-        return this.map.getBounds();
-    }
+    // --- Utilities ---
 
-    /**
-     * Set map view to specific bounds
-     */
-    setBounds(bounds) {
-        this.map.fitBounds(bounds);
-    }
-
-    /**
-     * Resize map (call after container resize or visibility change)
-     */
-    resize() {
-        if (this.map) {
-            this.map.invalidateSize();
-            // Force tile reload
-            this.map.setView(this.map.getCenter(), this.map.getZoom());
-        }
-    }
-
-    /**
-     * Force map refresh - call after container becomes visible
-     */
     refresh() {
         if (this.map) {
             this.map.invalidateSize();
@@ -340,9 +346,12 @@ class MapRenderer {
         }
     }
 
-    /**
-     * Destroy map instance
-     */
+    resize() {
+        if (this.map) {
+            this.map.invalidateSize();
+        }
+    }
+
     destroy() {
         if (this.map) {
             this.map.remove();
@@ -351,5 +360,4 @@ class MapRenderer {
     }
 }
 
-// Export for use in other modules
 window.MapRenderer = MapRenderer;

@@ -1,191 +1,361 @@
 /**
  * Animation Engine Module
- * Handles timeline animation with interpolation and camera following
+ * Ported from mahlernim/google-timeline-visualizer Python original
+ * 
+ * Features:
+ * - Distance-based animation timing with compression
+ * - Great-circle interpolation for long hops
+ * - Camera dead zone for smooth following
+ * - Transfer detection for flights
+ * - Multiple camera movement modes
  */
 class AnimationEngine {
     constructor(mapRenderer) {
         this.map = mapRenderer;
-        
-        // Animation state
+
+        // Route data
         this.points = [];
-        this.currentIndex = 0;
-        this.progress = 0; // 0 to 1
+        this.lats = [];
+        this.lons = [];
+        this.xs = [];  // Web Mercator x
+        this.ys = [];  // Web Mercator y
+        this.cumDist = [];
+        this.totalKm = 0;
+
+        // Transfer detection
+        this.legs = [];
+        this.thresholdKm = 0;
+
+        // Timing
+        this.distanceAt = null; // compression function
+        this.duration = 60000;
+        this.fps = 30;
+
+        // Animation state
+        this.progress = 0;
         this.isPlaying = false;
         this.animationFrame = null;
-        
-        // Timing
-        this.duration = 60000; // Default 60 seconds in ms
         this.startTime = 0;
         this.elapsedTime = 0;
         this.lastFrameTime = 0;
-        
-        // FPS
-        this.targetFPS = 30;
-        this.frameInterval = 1000 / this.targetFPS;
-        
-        // Interpolation
-        this.interpolatedPoints = [];
-        this.totalDistance = 0;
-        
+        this.frameInterval = 1000 / this.fps;
+
         // Camera settings
-        this.cameraDeadZone = 0.2; // 20% of screen
-        this.cameraSmooth = 0.1;
-        
+        this.cameraMode = 'steady';
+        this.compression = 'balanced';
+
+        // Frame data (pre-calculated)
+        this.framePoints = [];
+        this.frameIndices = [];
+        this.cameraTrack = [];
+        this.camCenters = [];
+        this.camSpans = [];
+
         // Callbacks
         this.onProgress = null;
         this.onComplete = null;
-        this.onFrame = null;
     }
 
     /**
-     * Set animation data
+     * Set animation data and prepare everything
      */
-    setData(points, durationSeconds = 60) {
+    setData(points, durationSeconds = 60, cameraMode = 'steady', compression = 'balanced') {
         this.points = points;
         this.duration = durationSeconds * 1000;
-        this.currentIndex = 0;
+        this.cameraMode = cameraMode;
+        this.compression = compression;
         this.progress = 0;
-        
-        // Pre-calculate interpolated points for smooth animation
-        this.preCalculateInterpolation();
-        
-        // Initialize route (don't draw yet, will be drawn progressively)
+        this.elapsedTime = 0;
+
+        // Convert points to arrays
+        this.lats = points.map(p => p.lat);
+        this.lons = points.map(p => p.lon);
+
+        // Convert to Web Mercator meters
+        this.xs = [];
+        this.ys = [];
+        for (const p of points) {
+            const m = Projection.latlonToMeters(p.lat, p.lon);
+            this.xs.push(m.x);
+            this.ys.push(m.y);
+        }
+
+        // Calculate cumulative distances
+        this.cumDist = [0.0];
+        let total = 0.0;
+        for (let i = 1; i < this.lats.length; i++) {
+            const d = Projection.haversineDistance(
+                this.lats[i - 1], this.lons[i - 1],
+                this.lats[i], this.lons[i]
+            );
+            total += d;
+            this.cumDist.push(total);
+        }
+        this.totalKm = total;
+
+        // Detect transfers
+        this.thresholdKm = TransferUtils.transferThresholdKm(this.cumDist);
+        this.legs = TransferUtils.buildLegs(this.cumDist, this.thresholdKm);
+
+        // Build timing function (with compression)
+        this.distanceAt = TimingUtils.buildJourneyTiming(this.cumDist, compression);
+
+        // Pre-calculate frame data
+        this.preCalculateFrames();
+
+        // Build camera track
+        this.buildCameraTrack();
+
+        // Initialize map
         this.map.initRoute(points, { fitBounds: true });
-        
-        console.log(`Animation set: ${points.length} points, ${durationSeconds}s duration`);
+
+        console.log(`Animation set: ${points.length} points, ${durationSeconds}s, ${this.totalKm.toFixed(1)}km`);
+        console.log(`Camera: ${cameraMode}, Compression: ${compression}, Transfers: ${this.legs.filter(l => l.isTransfer).length}`);
     }
 
     /**
-     * Pre-calculate interpolated points for smooth movement
+     * Pre-calculate all frame positions
      */
-    preCalculateInterpolation() {
-        this.interpolatedPoints = [];
-        this.totalDistance = 0;
-        
-        // Calculate cumulative distances
-        const distances = [0];
-        for (let i = 1; i < this.points.length; i++) {
-            const dist = this.haversineDistance(
-                this.points[i - 1].lat, this.points[i - 1].lon,
-                this.points[i].lat, this.points[i].lon
-            );
-            this.totalDistance += dist;
-            distances.push(this.totalDistance);
+    preCalculateFrames() {
+        const totalFrames = Math.round(this.fps * (this.duration / 1000));
+        this.frameProgress = [];
+        this.framePoints = [];
+        this.frameIndices = [];
+
+        for (let i = 0; i < totalFrames; i++) {
+            const progress = i / (totalFrames - 1);
+            this.frameProgress.push(progress);
+
+            // Get distance at this progress
+            const distKm = this.distanceAt(progress);
+
+            // Find index in route
+            const idx = this.bisectRight(this.cumDist, distKm) - 1;
+            const frameIdx = Math.min(Math.max(idx, 0), this.cumDist.length - 1);
+            this.frameIndices.push(frameIdx);
+
+            // Get interpolated position
+            const pos = Projection.positionAtDistance(this.cumDist, this.lats, this.lons, distKm);
+            const meterPos = Projection.latlonToMeters(pos.lat, pos.lon);
+            this.framePoints.push(meterPos);
         }
-        
-        // Generate interpolated points based on time
-        const targetPoints = Math.min(this.points.length * 2, 10000);
-        
-        for (let i = 0; i < targetPoints; i++) {
-            const targetDistance = (i / (targetPoints - 1)) * this.totalDistance;
-            
-            // Find segment
-            let segmentIndex = 0;
-            while (segmentIndex < distances.length - 1 && 
-                   distances[segmentIndex + 1] < targetDistance) {
-                segmentIndex++;
-            }
-            
-            if (segmentIndex >= this.points.length - 1) {
-                this.interpolatedPoints.push(this.points[this.points.length - 1]);
+    }
+
+    /**
+     * Build camera track (from Python: build_camera_track)
+     */
+    buildCameraTrack() {
+        const movement = ENGINE_CONFIG.CAMERA_MOVEMENTS[this.cameraMode];
+        const totalFrames = this.frameProgress.length;
+
+        // Sample camera positions
+        const rawSamples = [];
+        for (let i = 0; i <= ENGINE_CONFIG.CAMERA_TRACK_SAMPLES; i++) {
+            const sample = i / ENGINE_CONFIG.CAMERA_TRACK_SAMPLES;
+            const distKm = this.distanceAt(sample);
+            const sampleResult = this.rawCameraSample(distKm, movement);
+            rawSamples.push(sampleResult);
+        }
+
+        // Handle fixed zoom
+        let fixedSpan = null;
+        if (movement.fixed_zoom) {
+            const spans = rawSamples.map(s => s.span).sort((a, b) => a - b);
+            fixedSpan = spans[Math.floor(spans.length * ENGINE_CONFIG.FIXED_ZOOM_PERCENTILE)];
+        }
+
+        // Smooth camera track with dead zone
+        this.cameraTrack = [];
+        for (let i = 0; i < rawSamples.length; i++) {
+            const raw = rawSamples[i];
+            const targetSpan = fixedSpan !== null ? fixedSpan : raw.span;
+
+            if (i === 0) {
+                this.cameraTrack.push({ x: raw.x, y: raw.y, span: targetSpan });
                 continue;
             }
-            
-            // Interpolate within segment
-            const segmentStart = distances[segmentIndex];
-            const segmentEnd = distances[segmentIndex + 1];
-            const segmentLength = segmentEnd - segmentStart;
-            
-            const fraction = segmentLength > 0 ? 
-                (targetDistance - segmentStart) / segmentLength : 0;
-            
-            const interpolated = this.interpolatePoints(
-                this.points[segmentIndex],
-                this.points[segmentIndex + 1],
-                fraction
-            );
-            
-            this.interpolatedPoints.push(interpolated);
+
+            const prev = this.cameraTrack[this.cameraTrack.length - 1];
+
+            // Smooth zoom
+            const alpha = targetSpan > prev.span ? movement.zoom_out_alpha : movement.zoom_in_alpha;
+            const span = movement.fixed_zoom ? targetSpan :
+                Math.exp(Math.log(prev.span) + (Math.log(targetSpan) - Math.log(prev.span)) * alpha);
+
+            // Apply dead zone
+            const deadHalf = span * ENGINE_CONFIG.CAMERA_DEAD_ZONE_HALF;
+            let cx = prev.x;
+            let cy = prev.y;
+
+            if (raw.x < cx - deadHalf) cx = raw.x + deadHalf;
+            else if (raw.x > cx + deadHalf) cx = raw.x - deadHalf;
+
+            if (raw.y < cy - deadHalf) cy = raw.y + deadHalf;
+            else if (raw.y > cy + deadHalf) cy = raw.y - deadHalf;
+
+            this.cameraTrack.push({ x: cx, y: cy, span: span });
+        }
+
+        // Map camera track to frame progress
+        this.camCenters = [];
+        this.camSpans = [];
+
+        for (let i = 0; i < totalFrames; i++) {
+            const progress = this.frameProgress[i];
+            const cam = this.cameraAt(progress);
+            this.camCenters.push(cam);
+            this.camSpans.push(cam.span);
         }
     }
 
     /**
-     * Interpolate between two points (great circle)
+     * Raw camera sample (from Python: raw_camera_sample)
      */
-    interpolatePoints(p1, p2, fraction) {
-        if (fraction <= 0) return { ...p1 };
-        if (fraction >= 1) return { ...p2 };
-        
-        // Simple linear interpolation for lat/lon
-        // For more accuracy, use great circle interpolation
+    rawCameraSample(distanceKm, movement) {
+        const totalKm = this.totalKm;
+
+        // Position at distance
+        const pos = Projection.positionAtDistance(this.cumDist, this.lats, this.lons, distanceKm);
+        const meterPos = Projection.latlonToMeters(pos.lat, pos.lon);
+
+        // Context size
+        const context = Math.max(
+            movement.minimum_context_km,
+            Math.min(movement.maximum_context_km, totalKm * movement.context_fraction)
+        );
+
+        // Check if in a transfer leg
+        const leg = movement.leg_aware ?
+            TransferUtils.legAt(this.legs, distanceKm, totalKm) : null;
+
+        let padding, rangeStart, lookaheadLimit;
+
+        if (leg && leg.isTransfer) {
+            // Transfer: zoom to fit the whole transfer
+            const legContext = leg.end - leg.start;
+            const tailDist = Math.max(0, distanceKm - legContext);
+            const lookaheadDist = Math.min(totalKm, distanceKm + legContext);
+
+            const startIdx = this.bisectLeft(this.cumDist, tailDist);
+            const endIdx = this.bisectRight(this.cumDist, lookaheadDist);
+
+            const focusXs = this.xs.slice(startIdx, endIdx);
+            const focusYs = this.ys.slice(startIdx, endIdx);
+
+            // Add edge points
+            for (const edgeDist of [tailDist, distanceKm, lookaheadDist]) {
+                const edgePos = Projection.positionAtDistance(this.cumDist, this.lats, this.lons, edgeDist);
+                const edgeMeter = Projection.latlonToMeters(edgePos.lat, edgePos.lon);
+                focusXs.push(edgeMeter.x);
+                focusYs.push(edgeMeter.y);
+            }
+
+            const minSpan = movement.minimum_span * (2 * ENGINE_CONFIG.MAX_EXTENT);
+            const span = Math.max(
+                (Math.max(...focusXs) - Math.min(...focusXs)) * ENGINE_CONFIG.TRANSFER_PADDING,
+                (Math.max(...focusYs) - Math.min(...focusYs)) * ENGINE_CONFIG.TRANSFER_PADDING,
+                minSpan
+            );
+
+            return {
+                x: meterPos.x,
+                y: meterPos.y,
+                span: Math.min(span, 0.72 * 2 * ENGINE_CONFIG.MAX_EXTENT)
+            };
+        } else {
+            // Normal movement
+            padding = movement.padding;
+            rangeStart = leg ? leg.start : 0.0;
+            lookaheadLimit = totalKm;
+        }
+
+        const tailDist = Math.max(rangeStart, distanceKm - context);
+        const lookaheadDist = Math.min(lookaheadLimit, distanceKm + context);
+
+        const startIdx = this.bisectLeft(this.cumDist, tailDist);
+        const endIdx = this.bisectRight(this.cumDist, lookaheadDist);
+
+        const focusXs = this.xs.slice(startIdx, endIdx);
+        const focusYs = this.ys.slice(startIdx, endIdx);
+
+        // Add edge points
+        for (const edgeDist of [tailDist, distanceKm, lookaheadDist]) {
+            const edgePos = Projection.positionAtDistance(this.cumDist, this.lats, this.lons, edgeDist);
+            const edgeMeter = Projection.latlonToMeters(edgePos.lat, edgePos.lon);
+            focusXs.push(edgeMeter.x);
+            focusYs.push(edgeMeter.y);
+        }
+
+        const minSpan = movement.minimum_span * (2 * ENGINE_CONFIG.MAX_EXTENT);
+        const span = Math.max(
+            (Math.max(...focusXs) - Math.min(...focusXs)) * padding,
+            (Math.max(...focusYs) - Math.min(...focusYs)) * padding,
+            minSpan
+        );
+
         return {
-            lat: p1.lat + (p2.lat - p1.lat) * fraction,
-            lon: p1.lon + (p2.lon - p1.lon) * fraction,
-            timestamp: p1.timestamp ? 
-                p1.timestamp + (p2.timestamp - p1.timestamp) * fraction : null
+            x: meterPos.x,
+            y: meterPos.y,
+            span: Math.min(span, 0.72 * 2 * ENGINE_CONFIG.MAX_EXTENT)
         };
     }
 
     /**
-     * Calculate distance between two points
+     * Get camera position at progress (from Python: camera_at)
      */
-    haversineDistance(lat1, lon1, lat2, lon2) {
-        const R = 6371; // Earth's radius in km
-        const dLat = this.toRad(lat2 - lat1);
-        const dLon = this.toRad(lon2 - lon1);
-        const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-                  Math.cos(this.toRad(lat1)) * Math.cos(this.toRad(lat2)) *
-                  Math.sin(dLon / 2) * Math.sin(dLon / 2);
-        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        return R * c;
+    cameraAt(progress) {
+        const position = Math.max(0.0, Math.min(1.0, progress)) * (this.cameraTrack.length - 1);
+        const fromIndex = Math.floor(position);
+        const toIndex = Math.min(fromIndex + 1, this.cameraTrack.length - 1);
+        const fraction = position - fromIndex;
+
+        const before = this.cameraTrack[fromIndex];
+        const after = this.cameraTrack[toIndex];
+
+        return {
+            x: before.x + (after.x - before.x) * fraction,
+            y: before.y + (after.y - before.y) * fraction,
+            span: Math.exp(Math.log(before.span) + (Math.log(after.span) - Math.log(before.span)) * fraction)
+        };
     }
 
-    /**
-     * Convert degrees to radians
-     */
-    toRad(deg) {
-        return deg * Math.PI / 180;
-    }
+    // --- Playback Controls ---
 
-    /**
-     * Start playback
-     */
     play() {
         if (this.isPlaying) return;
-        
         this.isPlaying = true;
         this.startTime = performance.now() - this.elapsedTime;
         this.lastFrameTime = performance.now();
-        
         this.animate();
     }
 
-    /**
-     * Pause playback
-     */
     pause() {
         this.isPlaying = false;
-        
         if (this.animationFrame) {
             cancelAnimationFrame(this.animationFrame);
             this.animationFrame = null;
         }
     }
 
-    /**
-     * Stop and reset
-     */
     stop() {
         this.pause();
         this.elapsedTime = 0;
         this.progress = 0;
-        this.currentIndex = 0;
-        
+        this.notifyProgress();
         // Reset map
-        if (this.interpolatedPoints.length > 0) {
-            this.map.updateProgress(0, this.interpolatedPoints);
+        if (this.framePoints.length > 0) {
+            this.map.updateProgress(0, this.points, this.framePoints, this.camCenters, this.camSpans);
         }
-        
+    }
+
+    seek(progress) {
+        this.progress = Math.max(0, Math.min(1, progress));
+        this.elapsedTime = this.progress * this.duration;
+        this.currentIndex = Math.floor(this.progress * (this.framePoints.length - 1));
+
+        // Update map
+        this.map.updateProgress(this.progress, this.points, this.framePoints, this.camCenters, this.camSpans);
+
         this.notifyProgress();
     }
 
@@ -194,98 +364,60 @@ class AnimationEngine {
      */
     animate() {
         if (!this.isPlaying) return;
-        
+
         const now = performance.now();
         const deltaTime = now - this.lastFrameTime;
-        
-        // Check if enough time has passed for next frame
+
         if (deltaTime >= this.frameInterval) {
             this.lastFrameTime = now - (deltaTime % this.frameInterval);
-            
-            // Update elapsed time
+
             this.elapsedTime = now - this.startTime;
-            
-            // Calculate progress
             this.progress = Math.min(1, this.elapsedTime / this.duration);
-            
-            // Get current interpolated point index
-            this.currentIndex = Math.floor(this.progress * (this.interpolatedPoints.length - 1));
-            
+            this.currentIndex = Math.floor(this.progress * (this.framePoints.length - 1));
+
             // Update map
-            this.map.updateProgress(this.progress, this.interpolatedPoints);
-            
-            // Notify progress
+            this.map.updateProgress(this.progress, this.points, this.framePoints, this.camCenters, this.camSpans);
+
             this.notifyProgress();
-            
-            // Call frame callback
-            if (this.onFrame) {
-                this.onFrame(this.progress, this.currentIndex);
-            }
-            
-            // Check if animation complete
+
             if (this.progress >= 1) {
                 this.onAnimationComplete();
                 return;
             }
         }
-        
-        // Continue animation
+
         this.animationFrame = requestAnimationFrame(() => this.animate());
     }
 
-    /**
-     * Handle animation completion
-     */
     onAnimationComplete() {
         this.isPlaying = false;
         this.progress = 1;
-        
         console.log('Animation complete');
-        
-        if (this.onComplete) {
-            this.onComplete();
+        if (this.onComplete) this.onComplete();
+    }
+
+    // --- Utilities ---
+
+    bisectLeft(arr, value) {
+        let lo = 0, hi = arr.length;
+        while (lo < hi) {
+            const mid = (lo + hi) >> 1;
+            if (arr[mid] < value) lo = mid + 1;
+            else hi = mid;
         }
+        return lo;
     }
 
-    /**
-     * Seek to specific progress
-     */
-    seek(progress) {
-        this.progress = Math.max(0, Math.min(1, progress));
-        this.elapsedTime = this.progress * this.duration;
-        this.currentIndex = Math.floor(this.progress * (this.interpolatedPoints.length - 1));
-        
-        // Update map
-        this.map.updateProgress(this.progress, this.interpolatedPoints);
-        
-        this.notifyProgress();
+    bisectRight(arr, value) {
+        let lo = 0, hi = arr.length;
+        while (lo < hi) {
+            const mid = (lo + hi) >> 1;
+            if (arr[mid] <= value) lo = mid + 1;
+            else hi = mid;
+        }
+        return lo;
     }
 
-    /**
-     * Seek to specific time
-     */
-    seekToTime(timeMs) {
-        const progress = timeMs / this.duration;
-        this.seek(progress);
-    }
-
-    /**
-     * Get current progress
-     */
-    getProgress() {
-        return this.progress;
-    }
-
-    /**
-     * Get current time in ms
-     */
-    getCurrentTime() {
-        return this.elapsedTime;
-    }
-
-    /**
-     * Get formatted time string
-     */
     getTimeString(ms) {
         const seconds = Math.floor(ms / 1000);
         const minutes = Math.floor(seconds / 60);
@@ -293,16 +425,10 @@ class AnimationEngine {
         return `${minutes}:${secs.toString().padStart(2, '0')}`;
     }
 
-    /**
-     * Get duration string
-     */
     getDurationString() {
         return this.getTimeString(this.duration);
     }
 
-    /**
-     * Notify progress callback
-     */
     notifyProgress() {
         if (this.onProgress) {
             this.onProgress({
@@ -311,43 +437,16 @@ class AnimationEngine {
                 duration: this.duration,
                 currentTimeStr: this.getTimeString(this.elapsedTime),
                 durationStr: this.getDurationString(),
-                currentIndex: this.currentIndex,
-                totalPoints: this.interpolatedPoints.length
+                currentIndex: this.currentIndex || 0,
+                totalPoints: this.framePoints.length
             });
         }
     }
 
-    /**
-     * Set target FPS
-     */
     setFPS(fps) {
-        this.targetFPS = fps;
+        this.fps = fps;
         this.frameInterval = 1000 / fps;
-    }
-
-    /**
-     * Set duration in seconds
-     */
-    setDuration(seconds) {
-        this.duration = seconds * 1000;
-    }
-
-    /**
-     * Get current frame as image data
-     * Used for video export
-     */
-    async getCurrentFrame(width, height) {
-        // Capture map view
-        return await this.map.captureFrame(width, height);
-    }
-
-    /**
-     * Get all interpolated points for export
-     */
-    getInterpolatedPoints() {
-        return this.interpolatedPoints;
     }
 }
 
-// Export for use in other modules
 window.AnimationEngine = AnimationEngine;
