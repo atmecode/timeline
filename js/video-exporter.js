@@ -1,7 +1,7 @@
 /**
  * Video Exporter Module
- * Exports animation to MP4 using MediaRecorder API
- * Falls back to frame capture if MediaRecorder not available
+ * Exports animation to WebM using MediaRecorder API
+ * Renders frames directly to canvas for reliable capture
  */
 class VideoExporter {
     constructor(memoryManager) {
@@ -18,12 +18,12 @@ class VideoExporter {
     }
 
     /**
-     * Export animation to MP4 using MediaRecorder
-     * @param {Function} frameGenerator - Function that generates frames
+     * Export animation to WebM using MediaRecorder
+     * @param {Function} frameRenderer - Function that renders frame to canvas
      * @param {Object} options - Export options
      * @returns {Promise<Blob>} Video blob
      */
-    async export(frameGenerator, options = {}) {
+    async export(frameRenderer, options = {}) {
         if (this.isExporting) {
             throw new Error('Export already in progress');
         }
@@ -47,6 +47,10 @@ class VideoExporter {
             canvas.width = width;
             canvas.height = height;
             const ctx = canvas.getContext('2d');
+            
+            // Fill with dark background initially
+            ctx.fillStyle = '#1a1a2e';
+            ctx.fillRect(0, 0, width, height);
             
             // Get stream from canvas
             const stream = canvas.captureStream(fps);
@@ -80,6 +84,8 @@ class VideoExporter {
             const totalFrames = fps * duration;
             const frameInterval = 1000 / fps;
             
+            console.log(`Recording ${totalFrames} frames at ${fps}fps`);
+            
             // Record frames
             for (let frame = 0; frame < totalFrames; frame++) {
                 if (this.cancelled) {
@@ -89,11 +95,8 @@ class VideoExporter {
                 
                 const progress = frame / totalFrames;
                 
-                // Generate frame
-                const frameData = await frameGenerator(progress);
-                
-                // Draw frame to canvas
-                await this.drawFrameToCanvas(ctx, frameData, width, height);
+                // Render frame to canvas (this draws directly on the canvas)
+                await frameRenderer(ctx, progress, width, height);
                 
                 // Report progress
                 if (this.onProgress) {
@@ -121,6 +124,8 @@ class VideoExporter {
             // Create blob from chunks
             const videoBlob = new Blob(chunks, { type: mimeType });
             
+            console.log('Video export complete, size:', videoBlob.size);
+            
             this.isExporting = false;
             return videoBlob;
             
@@ -137,9 +142,7 @@ class VideoExporter {
         const types = [
             'video/webm;codecs=vp9',
             'video/webm;codecs=vp8',
-            'video/webm;codecs=h264',
-            'video/webm',
-            'video/mp4'
+            'video/webm'
         ];
         
         for (const type of types) {
@@ -148,21 +151,6 @@ class VideoExporter {
             }
         }
         return null;
-    }
-
-    /**
-     * Draw frame data to canvas
-     */
-    async drawFrameToCanvas(ctx, frameData, width, height) {
-        return new Promise((resolve, reject) => {
-            const img = new Image();
-            img.onload = () => {
-                ctx.drawImage(img, 0, 0, width, height);
-                resolve();
-            };
-            img.onerror = reject;
-            img.src = frameData;
-        });
     }
 
     /**
@@ -197,7 +185,7 @@ class VideoExporter {
         let supportedTypes = [];
         
         if (hasMediaRecorder) {
-            const types = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm', 'video/mp4'];
+            const types = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'];
             supportedTypes = types.filter(t => MediaRecorder.isTypeSupported(t));
         }
         

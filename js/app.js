@@ -4,7 +4,7 @@
  */
 class App {
     // Version info
-    static VERSION = '1.2.1';
+    static VERSION = '1.3.0';
     static BUILD_DATE = '2025-08-20';
     
     constructor() {
@@ -553,32 +553,29 @@ class App {
         this.showProgress('Preparing video export...');
         
         try {
-            // Create frame generator
-            const frameGenerator = async (progress) => {
+            // Create frame renderer - draws directly to canvas
+            const frameRenderer = async (ctx, progress, width, height) => {
                 // Update animation to frame position
                 this.animation.seek(progress);
                 
-                // Wait for map to render
-                await new Promise(resolve => setTimeout(resolve, 50));
-                
-                // Capture frame
-                const dimensions = this.memoryManager.getResolutionDimensions();
-                return await this.mapRenderer.captureFrame(dimensions.width, dimensions.height);
+                // Render frame directly to canvas
+                this.mapRenderer.renderToCanvas(ctx, width, height, this.parsedPoints, progress);
             };
             
             // Set up progress callback
             this.exporter.onProgress = (data) => {
                 const percent = Math.round(data.progress * 100);
                 this.updateProgress(
-                    `Encoding: ${data.stage}`,
+                    `Recording: ${Math.round(data.progress * 100)}%`,
                     percent
                 );
             };
             
             // Export video
-            const videoBlob = await this.exporter.export(frameGenerator, {
-                width: this.memoryManager.getResolutionDimensions().width,
-                height: this.memoryManager.getResolutionDimensions().height,
+            const dimensions = this.memoryManager.getResolutionDimensions();
+            const videoBlob = await this.exporter.export(frameRenderer, {
+                width: dimensions.width,
+                height: dimensions.height,
                 fps: this.memoryManager.config.fps,
                 duration: duration,
                 title: title

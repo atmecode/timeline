@@ -227,36 +227,71 @@ class MapRenderer {
     }
 
     /**
-     * Capture current map view as image
-     * @returns {Promise<string>} Base64 image data
+     * Render current map state to canvas context
+     * This is used for video export - draws directly to canvas
      */
-    async captureFrame(width = 1920, height = 1080) {
-        return new Promise((resolve, reject) => {
-            try {
-                // Create offscreen canvas
-                const canvas = document.createElement('canvas');
-                canvas.width = width;
-                canvas.height = height;
-                const ctx = canvas.getContext('2d');
-
-                // Use leaflet-image or html2canvas if available
-                // Fallback: use map container screenshot
-                const mapContainer = document.getElementById(this.containerId);
+    renderToCanvas(ctx, width, height, points, progress) {
+        // Draw background
+        ctx.fillStyle = '#1a1a2e';
+        ctx.fillRect(0, 0, width, height);
+        
+        // Get current map state
+        const bounds = this.map.getBounds();
+        const zoom = this.map.getZoom();
+        
+        // Calculate map projection
+        const latSpan = bounds.getNorth() - bounds.getSouth();
+        const lngSpan = bounds.getEast() - bounds.getWest();
+        
+        // Draw route if we have points
+        if (points && points.length > 0 && progress > 0) {
+            const currentIndex = Math.floor(progress * (points.length - 1));
+            
+            // Draw route path
+            ctx.beginPath();
+            ctx.strokeStyle = '#ff0055';
+            ctx.lineWidth = 3;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            
+            for (let i = 0; i <= currentIndex && i < points.length; i++) {
+                const x = ((points[i].lon - bounds.getWest()) / lngSpan) * width;
+                const y = ((bounds.getNorth() - points[i].lat) / latSpan) * height;
                 
-                // Simple approach: use canvas to render
-                // Note: For production, use leaflet-image plugin
-                html2canvas(mapContainer, {
-                    canvas: canvas,
-                    width: width,
-                    height: height,
-                    logging: false
-                }).then(canvas => {
-                    resolve(canvas.toDataURL('image/png'));
-                }).catch(reject);
-            } catch (error) {
-                reject(error);
+                if (i === 0) {
+                    ctx.moveTo(x, y);
+                } else {
+                    ctx.lineTo(x, y);
+                }
             }
-        });
+            ctx.stroke();
+            
+            // Draw current position marker
+            if (currentIndex < points.length) {
+                const currentPoint = points[currentIndex];
+                const markerX = ((currentPoint.lon - bounds.getWest()) / lngSpan) * width;
+                const markerY = ((bounds.getNorth() - currentPoint.lat) / latSpan) * height;
+                
+                // Draw marker circle
+                ctx.beginPath();
+                ctx.arc(markerX, markerY, 8, 0, Math.PI * 2);
+                ctx.fillStyle = '#ff0055';
+                ctx.fill();
+                ctx.strokeStyle = 'white';
+                ctx.lineWidth = 3;
+                ctx.stroke();
+            }
+            
+            // Draw progress info
+            ctx.fillStyle = 'white';
+            ctx.font = '14px Arial';
+            ctx.fillText(`${Math.round(progress * 100)}%`, 10, height - 10);
+        }
+        
+        // Draw title
+        ctx.fillStyle = 'white';
+        ctx.font = 'bold 16px Arial';
+        ctx.fillText('Timeline Visualizer', 10, 25);
     }
 
     /**
