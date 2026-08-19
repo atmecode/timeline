@@ -3,6 +3,10 @@
  * Google Timeline Visualizer
  */
 class App {
+    // Version info
+    static VERSION = '1.0.1';
+    static BUILD_DATE = '2025-08-20';
+    
     constructor() {
         // Core modules
         this.deviceDetector = new DeviceDetector();
@@ -228,6 +232,12 @@ class App {
      */
     renderDeviceInfo() {
         this.elements.deviceInfo.innerHTML = this.deviceDetector.renderInfo();
+        
+        // Show version info
+        const versionEl = document.getElementById('app-version');
+        if (versionEl) {
+            versionEl.textContent = `v${App.VERSION} (${App.BUILD_DATE})`;
+        }
     }
 
     /**

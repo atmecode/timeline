@@ -469,6 +469,13 @@ body {
     color: var(--success);
 }
 
+.version {
+    margin-top: 15px;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    opacity: 0.7;
+}
+
 /* === Warning Box === */
 .warning-box {
     background: rgba(255, 193, 7, 0.1);
