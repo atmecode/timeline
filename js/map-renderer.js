@@ -237,8 +237,17 @@ class MapRenderer {
 
     /**
      * Render to canvas for video export
+     * Includes title, date, and ending zoom-out like Python original
      */
-    renderToCanvas(ctx, width, height, routePoints, framePoints, camCenters, camSpans, progress) {
+    renderToCanvas(ctx, width, height, routePoints, framePoints, camCenters, camSpans, progress, options = {}) {
+        const {
+            title = 'Timeline Visualizer',
+            showDate = true,
+            timestamps = null,
+            isEnding = false
+        } = options;
+
+        // Background
         ctx.fillStyle = '#1a1a2e';
         ctx.fillRect(0, 0, width, height);
 
@@ -273,7 +282,7 @@ class MapRenderer {
             ctx.stroke();
         }
 
-        // Draw tail (bright)
+        // Draw tail (bright, distance-based)
         let currentDistKm = 0;
         for (let i = 1; i <= frameIndex && i < routePoints.length; i++) {
             currentDistKm += Projection.haversineDistance(
@@ -329,12 +338,65 @@ class MapRenderer {
             ctx.stroke();
         }
 
-        // Draw info
-        ctx.fillStyle = 'white';
-        ctx.font = 'bold 14px Arial';
-        ctx.fillText('Timeline Visualizer', 10, 25);
-        ctx.font = '12px Arial';
-        ctx.fillText(`${Math.round(progress * 100)}%`, 10, height - 10);
+        // --- UI Overlay (like Python original) ---
+
+        // Title (top center, like Python title_text)
+        const titleFontSize = Math.max(14, Math.round(width / 50));
+        ctx.font = `bold ${titleFontSize}px -apple-system, Arial, sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+
+        // Title background
+        const titleMetrics = ctx.measureText(title);
+        const titleBgWidth = titleMetrics.width + 30;
+        const titleBgHeight = titleFontSize + 16;
+        const titleBgX = (width - titleBgWidth) / 2;
+        const titleBgY = 15;
+
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+        ctx.beginPath();
+        ctx.roundRect(titleBgX, titleBgY, titleBgWidth, titleBgHeight, 6);
+        ctx.fill();
+
+        ctx.fillStyle = '#1a1a2e';
+        ctx.fillText(title, width / 2, titleBgY + 8);
+
+        // Date text (below title, like Python date_text)
+        if (showDate && timestamps && timestamps[frameIndex]) {
+            const date = new Date(timestamps[frameIndex]);
+            const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
+                'July', 'August', 'September', 'October', 'November', 'December'];
+            const dateStr = `${monthNames[date.getMonth()]} ${date.getFullYear()}`;
+
+            const dateFontSize = Math.max(12, Math.round(width / 60));
+            ctx.font = `${dateFontSize}px -apple-system, Arial, sans-serif`;
+
+            const dateMetrics = ctx.measureText(dateStr);
+            const dateBgWidth = dateMetrics.width + 20;
+            const dateBgHeight = dateFontSize + 12;
+            const dateBgX = (width - dateBgWidth) / 2;
+            const dateBgY = titleBgY + titleBgHeight + 5;
+
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+            ctx.beginPath();
+            ctx.roundRect(dateBgX, dateBgY, dateBgWidth, dateBgHeight, 4);
+            ctx.fill();
+
+            ctx.fillStyle = '#666';
+            ctx.fillText(dateStr, width / 2, dateBgY + 6);
+        }
+
+        // Attribution (bottom left)
+        const attrFontSize = Math.max(9, Math.round(width / 120));
+        ctx.font = `${attrFontSize}px -apple-system, Arial, sans-serif`;
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'bottom';
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+        ctx.fillText('© OpenStreetMap © CARTO', 10, height - 10);
+
+        // Reset text alignment
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
     }
 
     // --- Utilities ---

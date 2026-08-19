@@ -4,7 +4,7 @@
  */
 class App {
     // Version info
-    static VERSION = '2.1.0';
+    static VERSION = '2.2.0';
     static BUILD_DATE = '2025-08-20';
     
     constructor() {
@@ -212,6 +212,121 @@ class App {
                 this.mapRenderer.resize();
             }
         });
+
+        // Keyboard shortcuts
+        document.addEventListener('keydown', (e) => this.handleKeyboard(e));
+
+        // Load saved settings
+        this.loadSettings();
+    }
+
+    /**
+     * Handle keyboard shortcuts
+     */
+    handleKeyboard(e) {
+        // Don't handle if typing in input
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+        switch (e.code) {
+            case 'Space':
+                e.preventDefault();
+                if (this.animation) {
+                    this.animation.isPlaying ? this.pause() : this.play();
+                }
+                break;
+            case 'ArrowLeft':
+                e.preventDefault();
+                if (this.animation) {
+                    this.seek(Math.max(0, this.animation.progress - 0.05));
+                }
+                break;
+            case 'ArrowRight':
+                e.preventDefault();
+                if (this.animation) {
+                    this.seek(Math.min(1, this.animation.progress + 0.05));
+                }
+                break;
+            case 'KeyR':
+                if (this.animation) this.restart();
+                break;
+            case 'KeyP':
+                this.startPreview();
+                break;
+            case 'KeyE':
+                this.startExport();
+                break;
+        }
+    }
+
+    /**
+     * Save settings to localStorage
+     */
+    saveSettings() {
+        const settings = {
+            duration: this.elements.duration.value,
+            resolution: this.elements.resolution.value,
+            aspectRatio: this.elements.aspectRatio.value,
+            cameraMode: this.elements.cameraMode.value,
+            compression: this.elements.compression.value,
+            title: this.elements.title.value,
+            gpsFilter: this.elements.gpsFilter.checked
+        };
+        localStorage.setItem('timeline-visualizer-settings', JSON.stringify(settings));
+    }
+
+    /**
+     * Load settings from localStorage
+     */
+    loadSettings() {
+        try {
+            const saved = localStorage.getItem('timeline-visualizer-settings');
+            if (saved) {
+                const settings = JSON.parse(saved);
+                if (settings.duration) this.elements.duration.value = settings.duration;
+                if (settings.resolution) this.elements.resolution.value = settings.resolution;
+                if (settings.aspectRatio) this.elements.aspectRatio.value = settings.aspectRatio;
+                if (settings.cameraMode) this.elements.cameraMode.value = settings.cameraMode;
+                if (settings.compression) this.elements.compression.value = settings.compression;
+                if (settings.title) this.elements.title.value = settings.title;
+                if (settings.gpsFilter !== undefined) this.elements.gpsFilter.checked = settings.gpsFilter;
+                console.log('Settings loaded from localStorage');
+            }
+        } catch (e) {
+            console.warn('Failed to load settings:', e);
+        }
+    }
+
+    /**
+     * Calculate ETA for export
+     */
+    calculateETA(progress, startTime) {
+        if (progress <= 0) return 'Calculating...';
+        const elapsed = (Date.now() - startTime) / 1000;
+        const remaining = (elapsed / progress) * (1 - progress);
+        if (remaining < 60) return `~${Math.round(remaining)}s remaining`;
+        return `~${Math.round(remaining / 60)}m ${Math.round(remaining % 60)}s remaining`;
+    }
+
+    /**
+     * Share video using Web Share API
+     */
+    async shareVideo(blob, title) {
+        if (navigator.share && navigator.canShare) {
+            try {
+                const file = new File([blob], `${title}.mp4`, { type: blob.type });
+                if (navigator.canShare({ files: [file] })) {
+                    await navigator.share({
+                        title: title,
+                        text: 'My travel timeline',
+                        files: [file]
+                    });
+                    return true;
+                }
+            } catch (e) {
+                console.log('Share cancelled or failed:', e);
+            }
+        }
+        return false;
     }
 
     /**
@@ -445,6 +560,9 @@ class App {
             this.showToast('No timeline data loaded', 'error');
             return;
         }
+
+        // Save settings
+        this.saveSettings();
         
         // Initialize map if needed
         this.initMap();
@@ -542,6 +660,9 @@ class App {
             this.showToast('No timeline data loaded', 'error');
             return;
         }
+
+        // Save settings
+        this.saveSettings();
         
         // Check export support
         const supportInfo = VideoExporter.getSupportInfo();
@@ -658,6 +779,13 @@ class App {
         this.elements.downloadBtn.innerHTML = isMP4
             ? '💾 Download MP4'
             : '💾 Download WebM';
+        
+        // Add share button if supported
+        const shareBtn = document.getElementById('share-btn');
+        if (shareBtn) {
+            shareBtn.style.display = (navigator.share && navigator.canShare) ? 'inline-flex' : 'none';
+            shareBtn.onclick = () => this.shareVideo(videoBlob, title);
+        }
         
         // Show result section
         this.elements.exportResult.style.display = 'block';
