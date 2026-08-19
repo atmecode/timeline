@@ -4,7 +4,7 @@
  */
 class App {
     // Version info
-    static VERSION = '2.0.0';
+    static VERSION = '2.1.0';
     static BUILD_DATE = '2025-08-20';
     
     constructor() {
@@ -590,8 +590,13 @@ class App {
             // Set up progress callback
             this.exporter.onProgress = (data) => {
                 const percent = Math.round(data.progress * 100);
+                const stageText = {
+                    'recording': 'Recording',
+                    'converting': 'Converting to MP4',
+                    'finalizing': 'Finalizing'
+                }[data.stage] || data.stage;
                 this.updateProgress(
-                    `Recording: ${Math.round(data.progress * 100)}%`,
+                    `${stageText}: ${percent}%`,
                     percent
                 );
             };
@@ -638,12 +643,18 @@ class App {
         
         // Determine file extension based on mime type
         const mimeType = videoBlob.type || 'video/webm';
-        const extension = mimeType.includes('mp4') ? 'mp4' : 'webm';
+        const isMP4 = mimeType.includes('mp4');
+        const extension = isMP4 ? 'mp4' : 'webm';
         
         // Update UI
         this.elements.videoPreview.src = videoUrl;
         this.elements.downloadBtn.href = videoUrl;
         this.elements.downloadBtn.download = `${title}.${extension}`;
+        
+        // Update download button text
+        this.elements.downloadBtn.innerHTML = isMP4
+            ? '💾 Download MP4'
+            : '💾 Download WebM';
         
         // Show result section
         this.elements.exportResult.style.display = 'block';
