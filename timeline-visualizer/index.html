@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Google Timeline Visualizer</title>
+    
+    <!-- Leaflet.js CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" 
+          integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" 
+          crossorigin="" />
+    
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <h1>🌍 Google Timeline Visualizer</h1>
+            <p class="subtitle">Turn your Timeline file into an animated travel video</p>
+        </header>
+
+        <!-- Device Info Panel -->
+        <div id="device-info" class="device-info-panel">
+            <!-- Populated by JavaScript -->
+        </div>
+
+        <!-- File Upload Section -->
+        <section class="upload-section">
+            <div class="file-upload-area" id="drop-zone">
+                <input type="file" id="file-input" accept=".json" hidden>
+                <div class="upload-content">
+                    <span class="upload-icon">📁</span>
+                    <p>Drag & drop your <strong>Timeline.json</strong> here</p>
+                    <p class="small">or click to browse</p>
+                    <button class="btn btn-primary" id="browse-btn">Choose File</button>
+                </div>
+            </div>
+            <div id="file-info" class="file-info" style="display: none;">
+                <span class="file-name"></span>
+                <span class="file-points"></span>
+                <button class="btn btn-secondary btn-small" id="change-file-btn">Change</button>
+            </div>
+        </section>
+
+        <!-- Settings Section -->
+        <section class="settings-section" id="settings-section" style="display: none;">
+            <h2>⚙️ Video Settings</h2>
+            
+            <div class="settings-grid">
+                <!-- Date Range -->
+                <div class="setting-group">
+                    <label for="start-date">📅 Start Date</label>
+                    <input type="date" id="start-date" class="input">
+                </div>
+                <div class="setting-group">
+                    <label for="end-date">📅 End Date</label>
+                    <input type="date" id="end-date" class="input">
+                </div>
+
+                <!-- Duration -->
+                <div class="setting-group">
+                    <label for="duration">⏱️ Duration (seconds)</label>
+                    <input type="range" id="duration" min="10" max="300" value="60" class="slider">
+                    <span id="duration-value" class="slider-value">60s</span>
+                </div>
+
+                <!-- Resolution -->
+                <div class="setting-group">
+                    <label for="resolution">📐 Resolution</label>
+                    <select id="resolution" class="select">
+                        <option value="480p">480p (Fast)</option>
+                        <option value="720p" selected>720p (Balanced)</option>
+                        <option value="1080p">1080p (High Quality)</option>
+                    </select>
+                </div>
+
+                <!-- Title -->
+                <div class="setting-group">
+                    <label for="title">📝 Video Title</label>
+                    <input type="text" id="title" class="input" placeholder="My Travel 2024">
+                </div>
+
+                <!-- GPS Filter -->
+                <div class="setting-group">
+                    <label>
+                        <input type="checkbox" id="gps-filter" checked>
+                        🔍 GPS Outlier Filter
+                    </label>
+                </div>
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="action-buttons">
+                <button class="btn btn-secondary" id="preview-btn">
+                    👁️ Preview
+                </button>
+                <button class="btn btn-primary" id="export-btn">
+                    🎬 Export MP4
+                </button>
+            </div>
+        </section>
+
+        <!-- Map Section -->
+        <section class="map-section" id="map-section" style="display: none;">
+            <div id="map" class="map-container"></div>
+            
+            <!-- Progress Overlay -->
+            <div id="progress-overlay" class="progress-overlay" style="display: none;">
+                <div class="progress-content">
+                    <div class="spinner"></div>
+                    <p id="progress-text">Processing...</p>
+                    <div class="progress-bar-container">
+                        <div class="progress-bar" id="progress-bar"></div>
+                    </div>
+                    <p id="progress-percent">0%</p>
+                    <button class="btn btn-secondary btn-small" id="cancel-btn">Cancel</button>
+                </div>
+            </div>
+
+            <!-- Playback Controls -->
+            <div class="playback-controls" id="playback-controls" style="display: none;">
+                <button class="btn btn-icon" id="play-btn">▶️</button>
+                <button class="btn btn-icon" id="pause-btn" style="display: none;">⏸️</button>
+                <button class="btn btn-icon" id="restart-btn">🔄</button>
+                <div class="timeline-slider">
+                    <input type="range" id="playback-slider" min="0" max="100" value="0">
+                </div>
+                <span id="time-display">0:00 / 0:00</span>
+            </div>
+        </section>
+
+        <!-- Export Result -->
+        <section class="export-result" id="export-result" style="display: none;">
+            <div class="result-card">
+                <h3>✅ Export Complete!</h3>
+                <video id="video-preview" controls class="video-preview"></video>
+                <div class="result-actions">
+                    <a id="download-btn" class="btn btn-primary" download="timeline-video.mp4">
+                        💾 Download MP4
+                    </a>
+                    <button class="btn btn-secondary" id="new-video-btn">
+                        🔄 Create Another
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>Basemap © <a href="https://www.openstreetmap.org/" target="_blank">OpenStreetMap</a> contributors, 
+               © <a href="https://carto.com/" target="_blank">CARTO</a></p>
+            <p class="privacy">🔒 Your data never leaves your device</p>
+        </footer>
+    </div>
+
+    <!-- Loading FFmpeg.wasm -->
+    <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.12.7/dist/umd/ffmpeg.js"></script>
+    
+    <!-- Leaflet.js -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" 
+            integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" 
+            crossorigin=""></script>
+    
+    <!-- Application Scripts -->
+    <script src="js/device-detector.js"></script>
+    <script src="js/memory-manager.js"></script>
+    <script src="js/timeline-parser.js"></script>
+    <script src="js/map-renderer.js"></script>
+    <script src="js/animation.js"></script>
+    <script src="js/video-exporter.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
