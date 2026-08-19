@@ -1,14 +1,27 @@
 /**
  * Timeline Parser Module
  * Parses Google Timeline JSON files into normalized points
+ * 
+ * Supported formats (based on mahlernim/google-timeline-visualizer):
+ * 1. { "semanticSegments": [...] } - Current Android/iOS exports
+ * 2. Direct array of segments
+ * 
+ * Segment structure:
+ * {
+ *   "startTime": "ISO timestamp",
+ *   "endTime": "ISO timestamp",
+ *   "timelinePath": [
+ *     { "point": "geo:lat,lon", "time": "ISO", "durationMinutesOffsetFromStartTime": 0 }
+ *   ],
+ *   "activity": { "start": "geo:lat,lon", "end": "geo:lat,lon" },
+ *   "visit": { "topCandidate": { "placeLocation": "geo:lat,lon" } }
+ * }
  */
 class TimelineParser {
     constructor() {
         this.supportedFormats = [
-            'direct-array',           // Current Android/iOS exports
-            'semanticSegments',       // Older exports
-            'activitySegments',       // Some exports
-            'visitSegments'           // Some exports
+            'semanticSegments',
+            'direct-array'
         ];
     }
 
@@ -26,24 +39,34 @@ class TimelineParser {
         } = options;
 
         console.log('Parsing timeline data...');
+        console.log('Data type:', typeof data, Array.isArray(data) ? '(array)' : '');
         const startTime = performance.now();
 
-        let points = [];
+        let segments = [];
 
-        // Detect format and parse accordingly
+        // Detect format and extract segments
         if (Array.isArray(data)) {
-            points = this.parseDirectArray(data);
+            // Direct array of segments
+            segments = data;
+            console.log('Detected: Direct array format');
         } else if (data && typeof data === 'object') {
             if (data.semanticSegments) {
-                points = this.parseSemanticSegments(data.semanticSegments);
-            } else if (data.timelineObjects) {
-                points = this.parseTimelineObjects(data.timelineObjects);
+                // Object with semanticSegments
+                segments = data.semanticSegments;
+                console.log('Detected: semanticSegments format');
             } else {
-                throw new Error('Unsupported Timeline JSON format');
+                // Try to find segments in other properties
+                console.log('Available keys:', Object.keys(data).join(', '));
+                throw new Error('Unsupported Timeline JSON format. Expected "semanticSegments" key.');
             }
         } else {
             throw new Error('Invalid Timeline JSON data');
         }
+
+        console.log(`Found ${segments.length} segments`);
+
+        // Parse all points from segments
+        let points = this.parseSegments(segments);
 
         console.log(`Parsed ${points.length} raw points`);
 
@@ -57,11 +80,14 @@ class TimelineParser {
         if (filterGPS) {
             const beforeCount = points.length;
             points = this.filterGPSOutliers(points);
-            console.log(`GPS filter removed ${beforeCount - points.length} outlier points`);
+            const removed = beforeCount - points.length;
+            if (removed > 0) {
+                console.log(`GPS filter removed ${removed} outlier points`);
+            }
         }
 
         // Sort by timestamp
-        points.sort((a, b) => a.timestamp - b.timestamp);
+        points.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
 
         // Calculate statistics
         const stats = this.calculateStats(points);
@@ -77,231 +103,154 @@ class TimelineParser {
     }
 
     /**
-     * Parse direct array format (current Android/iOS exports)
+     * Parse all segments into normalized points
      */
-    parseDirectArray(data) {
+    parseSegments(segments) {
         const points = [];
-        
-        for (const item of data) {
-            const point = this.extractPoint(item);
-            if (point) {
-                points.push(point);
-            }
-        }
-        
-        return points;
-    }
 
-    /**
-     * Parse semantic segments format
-     */
-    parseSemanticSegments(segments) {
-        const points = [];
-        
-        for (const segment of segments) {
-            // Activity segments
-            if (segment.activitySegment) {
-                const activityPoints = this.parseActivitySegment(segment.activitySegment);
-                points.push(...activityPoints);
-            }
-            
-            // Visit segments
-            if (segment.visitSegment) {
-                const visitPoints = this.parseVisitSegment(segment.visitSegment);
-                points.push(...visitPoints);
-            }
-            
-            // Path segments
-            if (segment.path) {
-                const pathPoints = this.parsePathSegment(segment.path);
-                points.push(...pathPoints);
-            }
-        }
-        
-        return points;
-    }
+        for (const seg of segments) {
+            if (!seg || typeof seg !== 'object') continue;
 
-    /**
-     * Parse activity segment
-     */
-    parseActivitySegment(segment) {
-        const points = [];
-        
-        // Timeline path
-        if (segment.timelinePath) {
-            for (const pathPoint of segment.timelinePath) {
-                const point = this.extractPoint(pathPoint);
-                if (point) {
-                    point.activity = segment.activityType || 'unknown';
-                    points.push(point);
+            const startTime = seg.startTime;
+            const endTime = seg.endTime;
+
+            // 1. Parse timelinePath (route points)
+            if (seg.timelinePath && Array.isArray(seg.timelinePath)) {
+                for (const pathPoint of seg.timelinePath) {
+                    const point = this.parsePathPoint(pathPoint, startTime, endTime);
+                    if (point) points.push(point);
+                }
+            }
+
+            // 2. Parse activity (start and end points)
+            if (seg.activity && typeof seg.activity === 'object') {
+                const startCoords = this.parseCoordinate(seg.activity.start);
+                if (startCoords) {
+                    const ts = this.parseTimestamp(startTime);
+                    if (ts) {
+                        points.push({
+                            lat: startCoords.lat,
+                            lon: startCoords.lon,
+                            timestamp: ts
+                        });
+                    }
+                }
+                const endCoords = this.parseCoordinate(seg.activity.end);
+                if (endCoords) {
+                    const ts = this.parseTimestamp(endTime);
+                    if (ts) {
+                        points.push({
+                            lat: endCoords.lat,
+                            lon: endCoords.lon,
+                            timestamp: ts
+                        });
+                    }
+                }
+            }
+
+            // 3. Parse visit (topCandidate placeLocation)
+            if (seg.visit && typeof seg.visit === 'object') {
+                const candidate = seg.visit.topCandidate;
+                if (candidate && typeof candidate === 'object') {
+                    const coords = this.parseCoordinate(candidate.placeLocation);
+                    if (coords) {
+                        const ts = this.parseTimestamp(startTime);
+                        if (ts) {
+                            points.push({
+                                lat: coords.lat,
+                                lon: coords.lon,
+                                timestamp: ts
+                            });
+                        }
+                    }
                 }
             }
         }
-        
-        // Simple coordinates
-        if (segment.startLocation) {
-            const point = this.extractPoint(segment.startLocation);
-            if (point) {
-                point.activity = segment.activityType || 'unknown';
-                points.push(point);
-            }
-        }
-        
-        if (segment.endLocation) {
-            const point = this.extractPoint(segment.endLocation);
-            if (point) {
-                point.activity = segment.activityType || 'unknown';
-                points.push(point);
-            }
-        }
-        
-        return points;
+
+        // Deduplicate points
+        return this.deduplicatePoints(points);
     }
 
     /**
-     * Parse visit segment
+     * Parse a single path point
+     * Handles: { "point": "geo:lat,lon", "time": "ISO", "durationMinutesOffsetFromStartTime": N }
      */
-    parseVisitSegment(segment) {
-        const points = [];
-        
-        if (segment.place) {
-            const point = this.extractPoint(segment.place);
-            if (point) {
-                point.visitName = segment.place.name || 'Unknown';
-                point.visitDuration = segment.duration || 0;
-                points.push(point);
-            }
-        }
-        
-        return points;
-    }
+    parsePathPoint(pathPoint, segStartTime, segEndTime) {
+        if (!pathPoint || typeof pathPoint !== 'object') return null;
 
-    /**
-     * Parse path segment
-     */
-    parsePathSegment(path) {
-        const points = [];
-        
-        if (Array.isArray(path)) {
-            for (const point of path) {
-                const extracted = this.extractPoint(point);
-                if (extracted) {
-                    points.push(extracted);
-                }
-            }
-        }
-        
-        return points;
-    }
-
-    /**
-     * Parse timeline objects format (very old exports)
-     */
-    parseTimelineObjects(objects) {
-        const points = [];
-        
-        for (const obj of objects) {
-            if (obj.place) {
-                const point = this.extractPoint(obj.place);
-                if (point) {
-                    points.push(point);
-                }
-            }
-            
-            if (obj.activity && obj.activity.activityType) {
-                // Extract from activity
-                const point = this.extractPoint(obj);
-                if (point) {
-                    point.activity = obj.activity.activityType;
-                    points.push(point);
-                }
-            }
-        }
-        
-        return points;
-    }
-
-    /**
-     * Extract a normalized point from various formats
-     */
-    extractPoint(data) {
-        if (!data) return null;
-
-        let lat = null;
-        let lon = null;
-        let timestamp = null;
-
-        // Try different coordinate formats
-        const coordSources = [
-            data.location,
-            data.startLocation,
-            data.endLocation,
-            data.point,
-            data,
-            data.place
-        ];
-
-        for (const source of coordSources) {
-            if (!source) continue;
-
-            const coords = this.parseCoordinate(source);
-            if (coords) {
-                lat = coords.lat;
-                lon = coords.lon;
-                break;
-            }
-        }
-
-        if (lat === null || lon === null) {
-            return null;
-        }
-
-        // Validate coordinates
-        if (!this.isValidCoordinate(lat, lon)) {
-            return null;
-        }
+        // Parse coordinates
+        const coords = this.parseCoordinate(pathPoint.point);
+        if (!coords) return null;
 
         // Parse timestamp
-        timestamp = this.parseTimestamp(
-            data.timestamp || 
-            data.startTime || 
-            data.endDate ||
-            data.date
-        );
+        let timestamp = null;
+
+        // Try direct time first
+        if (pathPoint.time) {
+            timestamp = this.parseTimestamp(pathPoint.time);
+        }
+
+        // Fallback: use durationMinutesOffsetFromStartTime
+        if (timestamp === null && pathPoint.durationMinutesOffsetFromStartTime !== undefined) {
+            const offset = parseInt(pathPoint.durationMinutesOffsetFromStartTime);
+            if (!isNaN(offset) && offset >= 0) {
+                const startTs = this.parseTimestamp(segStartTime);
+                if (startTs) {
+                    timestamp = startTs + (offset * 60 * 1000);
+                    
+                    // Validate against end time
+                    if (segEndTime) {
+                        const endTs = this.parseTimestamp(segEndTime);
+                        if (endTs && timestamp > endTs + 60000) {
+                            return null; // Invalid offset
+                        }
+                    }
+                }
+            }
+        }
+
+        // Fallback: use segment start time
+        if (timestamp === null) {
+            timestamp = this.parseTimestamp(segStartTime);
+        }
 
         return {
-            lat: lat,
-            lon: lon,
-            timestamp: timestamp,
-            raw: data
+            lat: coords.lat,
+            lon: coords.lon,
+            timestamp: timestamp
         };
     }
 
     /**
      * Parse coordinate from various formats
+     * Supports: "geo:lat,lon", "lat,lon", { latLng: "lat,lon" }, etc.
      */
     parseCoordinate(value) {
         if (!value) return null;
 
-        // Handle object with latLng
+        // Handle string format: "geo:lat,lon" or "lat,lon"
+        if (typeof value === 'string') {
+            return this.parseCoordinateString(value);
+        }
+
+        // Handle object format
         if (typeof value === 'object') {
+            // { latLng: "lat,lon" }
             if (value.latLng) {
                 return this.parseCoordinateString(value.latLng);
             }
+            // { point: "lat,lon" }
             if (value.point) {
                 return this.parseCoordinateString(value.point);
             }
+            // { latitude: N, longitude: N }
             if (value.latitude !== undefined && value.longitude !== undefined) {
-                return { lat: value.latitude, lon: value.longitude };
+                return this.parseLatLon(value.latitude, value.longitude);
             }
+            // { lat: N, lng: N }
             if (value.lat !== undefined && value.lng !== undefined) {
-                return { lat: value.lat, lon: value.lng };
+                return this.parseLatLon(value.lat, value.lng);
             }
-        }
-
-        // Handle string
-        if (typeof value === 'string') {
-            return this.parseCoordinateString(value);
         }
 
         return null;
@@ -313,7 +262,7 @@ class TimelineParser {
     parseCoordinateString(str) {
         if (!str || typeof str !== 'string') return null;
 
-        // Remove geo: prefix
+        // Clean the string
         let cleaned = str.trim()
             .replace(/^geo:/, '')
             .replace(/\?.*$/, '')
@@ -336,10 +285,19 @@ class TimelineParser {
                 lon /= 10000000;
             }
 
-            return { lat, lon };
+            return this.parseLatLon(lat, lon);
         } catch (e) {
             return null;
         }
+    }
+
+    /**
+     * Parse latitude/longitude with validation
+     */
+    parseLatLon(lat, lon) {
+        if (isNaN(lat) || isNaN(lon)) return null;
+        if (!this.isValidCoordinate(lat, lon)) return null;
+        return { lat, lon };
     }
 
     /**
@@ -348,8 +306,7 @@ class TimelineParser {
     isValidCoordinate(lat, lon) {
         return (
             lat >= -85.05112878 && lat <= 85.05112878 &&
-            lon >= -180 && lon <= 180 &&
-            !isNaN(lat) && !isNaN(lon)
+            lon >= -180 && lon <= 180
         );
     }
 
@@ -361,12 +318,12 @@ class TimelineParser {
 
         // Already a Date object
         if (value instanceof Date) {
-            return value.getTime();
+            const ts = value.getTime();
+            return isNaN(ts) ? null : ts;
         }
 
         // Unix timestamp (seconds)
         if (typeof value === 'number') {
-            // If value is in seconds (not milliseconds)
             if (value < 10000000000) {
                 return value * 1000;
             }
@@ -375,13 +332,13 @@ class TimelineParser {
 
         // String timestamp
         if (typeof value === 'string') {
-            // Try ISO format
+            // ISO format: "2024-01-15T10:30:00.000Z" or "2024-01-15T10:30:00Z"
             const date = new Date(value);
             if (!isNaN(date.getTime())) {
                 return date.getTime();
             }
 
-            // Try format: "2024-01-15T10:30:00.000Z"
+            // Format: "2024-01-15T10:30:00"
             const match = value.match(/(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})/);
             if (match) {
                 const [, year, month, day, hours, minutes, seconds] = match;
@@ -393,6 +350,19 @@ class TimelineParser {
     }
 
     /**
+     * Deduplicate points based on timestamp and coordinates
+     */
+    deduplicatePoints(points) {
+        const seen = new Set();
+        return points.filter(point => {
+            const key = `${point.timestamp}-${point.lat.toFixed(6)}-${point.lon.toFixed(6)}`;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
+    }
+
+    /**
      * Filter points by date range
      */
     filterByDate(points, startDate, endDate) {
@@ -400,7 +370,7 @@ class TimelineParser {
         const end = endDate ? new Date(endDate).getTime() : Infinity;
 
         return points.filter(point => {
-            if (!point.timestamp) return true; // Keep points without timestamps
+            if (!point.timestamp) return true;
             return point.timestamp >= start && point.timestamp <= end;
         });
     }
@@ -412,29 +382,28 @@ class TimelineParser {
     filterGPSOutliers(points) {
         if (points.length < 3) return points;
 
-        const filtered = [points[0]]; // Always keep first point
+        const filtered = [points[0]];
 
         for (let i = 1; i < points.length - 1; i++) {
             const prev = points[i - 1];
             const curr = points[i];
             const next = points[i + 1];
 
-            // Calculate distances
             const distToPrev = this.haversineDistance(prev.lat, prev.lon, curr.lat, curr.lon);
             const distToNext = this.haversineDistance(curr.lat, curr.lon, next.lat, next.lon);
             const distPrevToNext = this.haversineDistance(prev.lat, prev.lon, next.lat, next.lon);
 
-            // Check for outlier: point is far from neighbors but neighbors are close
+            // Outlier: far from both neighbors but neighbors are close
             const isOutlier = (
-                distToPrev > 5 && // > 5km from previous
-                distToNext > 5 && // > 5km to next
-                distPrevToNext < 2 // But previous and next are close
+                distToPrev > 5 &&
+                distToNext > 5 &&
+                distPrevToNext < 2
             );
 
-            // Check for sudden direction change with large distance
+            // Sudden return: large distances but back to same area
             const isSuddenReturn = (
-                distToPrev > 10 && 
-                distToNext > 10 && 
+                distToPrev > 10 &&
+                distToNext > 10 &&
                 distPrevToNext < 1
             );
 
@@ -443,16 +412,15 @@ class TimelineParser {
             }
         }
 
-        filtered.push(points[points.length - 1]); // Always keep last point
-
+        filtered.push(points[points.length - 1]);
         return filtered;
     }
 
     /**
-     * Calculate distance between two points using Haversine formula
+     * Calculate distance using Haversine formula
      */
     haversineDistance(lat1, lon1, lat2, lon2) {
-        const R = 6371; // Earth's radius in km
+        const R = 6371;
         const dLat = this.toRad(lat2 - lat1);
         const dLon = this.toRad(lon2 - lon1);
         const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
@@ -470,7 +438,7 @@ class TimelineParser {
     }
 
     /**
-     * Calculate statistics for parsed points
+     * Calculate statistics
      */
     calculateStats(points) {
         if (points.length === 0) {
@@ -483,25 +451,17 @@ class TimelineParser {
         }
 
         let totalDistance = 0;
-        const activities = {};
         let minTimestamp = Infinity;
         let maxTimestamp = -Infinity;
 
         for (let i = 0; i < points.length; i++) {
             const point = points[i];
 
-            // Track timestamp range
             if (point.timestamp) {
                 minTimestamp = Math.min(minTimestamp, point.timestamp);
                 maxTimestamp = Math.max(maxTimestamp, point.timestamp);
             }
 
-            // Track activities
-            if (point.activity) {
-                activities[point.activity] = (activities[point.activity] || 0) + 1;
-            }
-
-            // Calculate distance
             if (i > 0) {
                 totalDistance += this.haversineDistance(
                     points[i - 1].lat, points[i - 1].lon,
@@ -517,32 +477,7 @@ class TimelineParser {
                 start: new Date(minTimestamp),
                 end: new Date(maxTimestamp),
                 days: Math.ceil((maxTimestamp - minTimestamp) / (1000 * 60 * 60 * 24))
-            } : null,
-            activities: activities
-        };
-    }
-
-    /**
-     * Get available date range from points
-     */
-    getDateRange(points) {
-        let min = Infinity;
-        let max = -Infinity;
-
-        for (const point of points) {
-            if (point.timestamp) {
-                min = Math.min(min, point.timestamp);
-                max = Math.max(max, point.timestamp);
-            }
-        }
-
-        if (min === Infinity) {
-            return null;
-        }
-
-        return {
-            start: new Date(min),
-            end: new Date(max)
+            } : null
         };
     }
 }
