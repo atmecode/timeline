@@ -51,6 +51,10 @@ class App {
      */
     cacheElements() {
         this.elements = {
+            // Global loading
+            globalLoading: document.getElementById('global-loading'),
+            loadingText: document.getElementById('loading-text'),
+            
             // File upload
             dropZone: document.getElementById('drop-zone'),
             fileInput: document.getElementById('file-input'),
@@ -227,13 +231,23 @@ class App {
         
         this.fileName = file.name;
         
-        // Show loading
-        this.showProgress('Loading Timeline file...');
+        // Show global loading
+        this.showGlobalLoading('Reading file...');
         
         try {
-            // Read file
+            // Read file (use setTimeout to allow UI to update)
+            await new Promise(resolve => setTimeout(resolve, 100));
             const text = await file.text();
+            
+            // Update loading text
+            this.updateGlobalLoading('Parsing JSON...');
+            await new Promise(resolve => setTimeout(resolve, 50));
+            
             const data = JSON.parse(text);
+            
+            // Update loading text
+            this.updateGlobalLoading('Extracting timeline points...');
+            await new Promise(resolve => setTimeout(resolve, 50));
             
             // Parse timeline
             const result = this.parser.parse(data, {
@@ -243,6 +257,10 @@ class App {
             this.timelineData = data;
             this.parsedPoints = result.points;
             
+            // Update loading text
+            this.updateGlobalLoading('Processing complete!');
+            await new Promise(resolve => setTimeout(resolve, 300));
+            
             // Update UI
             this.updateFileInfo(file.name, result.stats);
             this.updateDateRange(result.stats.dateRange);
@@ -251,13 +269,18 @@ class App {
             // Apply adaptive memory management
             this.applyMemoryAdaptation();
             
-            this.hideProgress();
-            this.showToast(`Loaded ${result.stats.totalPoints.toLocaleString()} points`, 'success');
+            this.hideGlobalLoading();
+            
+            if (result.stats.totalPoints > 0) {
+                this.showToast(`Loaded ${result.stats.totalPoints.toLocaleString()} points`, 'success');
+            } else {
+                this.showToast('No points found. Check your Timeline.json format.', 'warning');
+            }
             
         } catch (error) {
-            this.hideProgress();
+            this.hideGlobalLoading();
             console.error('Error loading file:', error);
-            this.showToast(`Error loading file: ${error.message}`, 'error');
+            this.showToast(`Error: ${error.message}`, 'error');
         }
     }
 
@@ -558,7 +581,29 @@ class App {
     }
 
     /**
-     * Show progress overlay
+     * Show global loading overlay
+     */
+    showGlobalLoading(text) {
+        this.elements.globalLoading.style.display = 'flex';
+        this.elements.loadingText.textContent = text;
+    }
+
+    /**
+     * Update global loading text
+     */
+    updateGlobalLoading(text) {
+        this.elements.loadingText.textContent = text;
+    }
+
+    /**
+     * Hide global loading overlay
+     */
+    hideGlobalLoading() {
+        this.elements.globalLoading.style.display = 'none';
+    }
+
+    /**
+     * Show progress overlay (for map/export)
      */
     showProgress(text) {
         this.elements.progressOverlay.style.display = 'flex';

@@ -611,6 +611,42 @@ body {
     opacity: 0.3;
 }
 
+/* === Action Hint === */
+.action-hint {
+    text-align: center;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    margin-top: 15px;
+}
+
+/* === Global Loading Overlay === */
+.global-loading {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(26, 26, 46, 0.9);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+}
+
+.loading-content {
+    text-align: center;
+    padding: 40px;
+    background: var(--surface);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+}
+
+.loading-content p {
+    margin-top: 20px;
+    font-size: 1.1rem;
+    color: var(--text-primary);
+}
+
 /* === Leaflet Customization === */
 .leaflet-container {
     background: var(--background);
