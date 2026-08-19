@@ -4,7 +4,7 @@
  */
 class App {
     // Version info
-    static VERSION = '1.2.0';
+    static VERSION = '1.2.1';
     static BUILD_DATE = '2025-08-20';
     
     constructor() {
@@ -382,10 +382,16 @@ class App {
      * Update duration preset button active state
      */
     updateDurationPreset(value) {
+        let matched = false;
         document.querySelectorAll('.preset-btn').forEach(btn => {
             const btnValue = parseInt(btn.dataset.duration);
-            btn.classList.toggle('active', btnValue === value);
+            const isActive = btnValue === value;
+            btn.classList.toggle('active', isActive);
+            if (isActive) matched = true;
         });
+        
+        // Add custom indicator to input if no preset matches
+        this.elements.duration.classList.toggle('custom-value', !matched);
     }
 
     /**

@@ -313,16 +313,27 @@ body {
     text-align: center;
 }
 
+.duration-input.custom-value {
+    border-color: var(--warning);
+    background: rgba(255, 193, 7, 0.1);
+}
+
 .duration-unit {
     color: var(--text-secondary);
     font-size: 0.9rem;
+}
+
+.duration-hint {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    margin-top: 8px;
+    margin-bottom: 8px;
 }
 
 .duration-presets {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
-    margin-top: 10px;
 }
 
 .preset-btn {
