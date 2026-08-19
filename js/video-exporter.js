@@ -1,15 +1,12 @@
 /**
  * Video Exporter Module
- * Exports animation to MP4 using FFmpeg.wasm
+ * Exports animation to MP4 using MediaRecorder API
+ * Falls back to frame capture if MediaRecorder not available
  */
 class VideoExporter {
     constructor(memoryManager) {
         this.memory = memoryManager;
         this.config = memoryManager.config;
-        
-        // FFmpeg instance
-        this.ffmpeg = null;
-        this.loaded = false;
         
         // Export state
         this.isExporting = false;
@@ -21,55 +18,7 @@ class VideoExporter {
     }
 
     /**
-     * Initialize FFmpeg.wasm
-     */
-    async init() {
-        if (this.loaded) return true;
-        
-        try {
-            console.log('Loading FFmpeg.wasm...');
-            
-            // Check for FFmpeg availability (UMD exports to FFmpegWASM)
-            const FFmpegModule = typeof FFmpeg !== 'undefined' ? FFmpeg : 
-                                 typeof FFmpegWASM !== 'undefined' ? FFmpegWASM : null;
-            
-            if (!FFmpegModule) {
-                throw new Error('FFmpeg.wasm not loaded. Check your internet connection.');
-            }
-            
-            // Get FFmpeg class from module
-            const FFmpegClass = FFmpegModule.FFmpeg || FFmpegModule;
-            this.ffmpeg = new FFmpegClass();
-            
-            // Set up progress handler
-            this.ffmpeg.on('progress', ({ progress, time }) => {
-                if (this.onProgress) {
-                    this.onProgress({
-                        progress: progress,
-                        time: time,
-                        stage: 'encoding'
-                    });
-                }
-            });
-            
-            // Load FFmpeg with core files
-            await this.ffmpeg.load({
-                coreURL: 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.js',
-                wasmURL: 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.wasm'
-            });
-            
-            this.loaded = true;
-            console.log('FFmpeg.wasm loaded successfully');
-            return true;
-            
-        } catch (error) {
-            console.error('Failed to load FFmpeg.wasm:', error);
-            throw new Error(`Failed to load video encoder: ${error.message}`);
-        }
-    }
-
-    /**
-     * Export animation to MP4
+     * Export animation to MP4 using MediaRecorder
      * @param {Function} frameGenerator - Function that generates frames
      * @param {Object} options - Export options
      * @returns {Promise<Blob>} Video blob
@@ -86,229 +35,134 @@ class VideoExporter {
             width = 1280,
             height = 720,
             fps = 30,
-            duration = 60, // seconds
+            duration = 60,
             title = 'timeline-video'
         } = options;
         
         try {
-            // Initialize FFmpeg if needed
-            await this.init();
+            this.notifyStage('preparing', 'Preparing video export...');
+            
+            // Create offscreen canvas for recording
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            
+            // Get stream from canvas
+            const stream = canvas.captureStream(fps);
+            
+            // Find supported mime type
+            const mimeType = this.getSupportedMimeType();
+            if (!mimeType) {
+                throw new Error('MediaRecorder not supported in this browser');
+            }
+            
+            console.log('Using mime type:', mimeType);
+            
+            // Create MediaRecorder
+            const recorder = new MediaRecorder(stream, {
+                mimeType: mimeType,
+                videoBitsPerSecond: 8000000 // 8 Mbps
+            });
+            
+            const chunks = [];
+            recorder.ondataavailable = (e) => {
+                if (e.data.size > 0) {
+                    chunks.push(e.data);
+                }
+            };
+            
+            // Start recording
+            recorder.start(100); // Collect data every 100ms
+            this.notifyStage('recording', 'Recording animation...');
             
             // Calculate total frames
             const totalFrames = fps * duration;
+            const frameInterval = 1000 / fps;
             
-            // Get optimal export settings based on device
-            const exportConfig = this.getExportConfig();
-            
-            // Notify stage
-            this.notifyStage('preparing', 'Preparing frames...');
-            
-            // Create frames directory
-            await this.ffmpeg.createDir('/frames');
-            
-            // Generate and save frames
-            await this.generateFrames(frameGenerator, totalFrames, exportConfig);
-            
-            if (this.cancelled) {
-                await this.cleanup();
-                return null;
+            // Record frames
+            for (let frame = 0; frame < totalFrames; frame++) {
+                if (this.cancelled) {
+                    recorder.stop();
+                    throw new Error('Export cancelled');
+                }
+                
+                const progress = frame / totalFrames;
+                
+                // Generate frame
+                const frameData = await frameGenerator(progress);
+                
+                // Draw frame to canvas
+                await this.drawFrameToCanvas(ctx, frameData, width, height);
+                
+                // Report progress
+                if (this.onProgress) {
+                    this.onProgress({
+                        progress: progress,
+                        stage: 'recording',
+                        currentFrame: frame,
+                        totalFrames: totalFrames
+                    });
+                }
+                
+                // Wait for frame interval
+                await new Promise(resolve => setTimeout(resolve, frameInterval));
             }
             
-            // Notify stage
-            this.notifyStage('encoding', 'Encoding video...');
+            // Stop recording
+            this.notifyStage('finalizing', 'Finalizing video...');
             
-            // Encode to MP4
-            const videoBlob = await this.encodeVideo(totalFrames, fps, exportConfig);
+            await new Promise((resolve, reject) => {
+                recorder.onstop = () => resolve();
+                recorder.onerror = (e) => reject(e);
+                recorder.stop();
+            });
             
-            // Cleanup
-            await this.cleanup();
+            // Create blob from chunks
+            const videoBlob = new Blob(chunks, { type: mimeType });
             
             this.isExporting = false;
             return videoBlob;
             
         } catch (error) {
             this.isExporting = false;
-            await this.cleanup();
             throw error;
         }
     }
 
     /**
-     * Get export configuration based on device tier
+     * Get supported MIME type for MediaRecorder
      */
-    getExportConfig() {
-        const configs = {
-            high: {
-                codec: 'libx264',
-                crf: 18,
-                preset: 'medium',
-                pixelFormat: 'yuv420p'
-            },
-            medium: {
-                codec: 'libx264',
-                crf: 23,
-                preset: 'fast',
-                pixelFormat: 'yuv420p'
-            },
-            low: {
-                codec: 'libx264',
-                crf: 28,
-                preset: 'ultrafast',
-                pixelFormat: 'yuv420p'
-            }
-        };
-        
-        return configs[this.memory.tier] || configs.medium;
-    }
-
-    /**
-     * Generate frames and save to FFmpeg filesystem
-     */
-    async generateFrames(frameGenerator, totalFrames, config) {
-        const chunkSize = this.config.chunkSize;
-        const totalChunks = Math.ceil(totalFrames / chunkSize);
-        
-        for (let chunkIdx = 0; chunkIdx < totalChunks; chunkIdx++) {
-            if (this.cancelled) break;
-            
-            const startFrame = chunkIdx * chunkSize;
-            const endFrame = Math.min(startFrame + chunkSize, totalFrames);
-            
-            // Check memory before each chunk
-            const memStatus = await this.memory.checkMemory();
-            
-            if (memStatus.isCritical) {
-                console.warn('Memory critical during frame generation');
-                // Could reduce quality or skip frames
-            }
-            
-            // Generate frames for this chunk
-            for (let frame = startFrame; frame < endFrame; frame++) {
-                if (this.cancelled) break;
-                
-                const progress = frame / totalFrames;
-                const frameNum = String(frame).padStart(6, '0');
-                
-                try {
-                    // Generate frame
-                    const frameData = await frameGenerator(progress);
-                    
-                    // Convert to PNG and save
-                    const pngBlob = await this.imageToPng(frameData);
-                    const pngBuffer = await pngBlob.arrayBuffer();
-                    
-                    await this.ffmpeg.writeFile(
-                        `/frames/frame_${frameNum}.png`,
-                        new Uint8Array(pngBuffer)
-                    );
-                    
-                } catch (error) {
-                    console.warn(`Failed to generate frame ${frame}:`, error);
-                    // Create placeholder frame
-                    await this.createPlaceholderFrame(frameNum);
-                }
-            }
-            
-            // Report progress
-            if (this.onProgress) {
-                this.onProgress({
-                    progress: (chunkIdx + 1) / totalChunks,
-                    stage: 'generating',
-                    currentFrame: endFrame,
-                    totalFrames: totalFrames
-                });
-            }
-            
-            // Yield to browser
-            await new Promise(resolve => setTimeout(resolve, 0));
-        }
-    }
-
-    /**
-     * Create a placeholder frame (gray)
-     */
-    async createPlaceholderFrame(frameNum) {
-        // Create a simple gray frame using FFmpeg
-        await this.ffmpeg.exec([
-            '-f', 'lavfi',
-            '-i', 'color=c=gray:s=1280x720:d=0.033',
-            '-frames:v', '1',
-            `/frames/frame_${frameNum}.png`
-        ]);
-    }
-
-    /**
-     * Convert image data to PNG blob
-     */
-    async imageToPng(imageData) {
-        return new Promise((resolve, reject) => {
-            // Create canvas from image data
-            const img = new Image();
-            img.onload = () => {
-                const canvas = document.createElement('canvas');
-                canvas.width = img.width;
-                canvas.height = img.height;
-                const ctx = canvas.getContext('2d');
-                ctx.drawImage(img, 0, 0);
-                
-                canvas.toBlob(resolve, 'image/png');
-            };
-            img.onerror = reject;
-            img.src = imageData;
-        });
-    }
-
-    /**
-     * Encode frames to MP4
-     */
-    async encodeVideo(totalFrames, fps, config) {
-        const outputFile = '/output.mp4';
-        
-        // Build FFmpeg command
-        const args = [
-            '-framerate', String(fps),
-            '-i', '/frames/frame_%06d.png',
-            '-c:v', config.codec,
-            '-crf', String(config.crf),
-            '-preset', config.preset,
-            '-pix_fmt', config.pixelFormat,
-            '-movflags', '+faststart',
-            outputFile
+    getSupportedMimeType() {
+        const types = [
+            'video/webm;codecs=vp9',
+            'video/webm;codecs=vp8',
+            'video/webm;codecs=h264',
+            'video/webm',
+            'video/mp4'
         ];
         
-        // Execute FFmpeg
-        await this.ffmpeg.exec(args);
-        
-        // Read output file
-        const data = await this.ffmpeg.readFile(outputFile);
-        
-        // Create Blob
-        return new Blob([data.buffer], { type: 'video/mp4' });
+        for (const type of types) {
+            if (MediaRecorder.isTypeSupported(type)) {
+                return type;
+            }
+        }
+        return null;
     }
 
     /**
-     * Cleanup FFmpeg filesystem
+     * Draw frame data to canvas
      */
-    async cleanup() {
-        try {
-            // Delete frames directory
-            const files = await this.ffmpeg.listDir('/frames');
-            for (const file of files) {
-                if (file.name !== '.' && file.name !== '..') {
-                    await this.ffmpeg.deleteFile(`/frames/${file.name}`);
-                }
-            }
-            await this.ffmpeg.deleteDir('/frames');
-            
-            // Delete output if exists
-            try {
-                await this.ffmpeg.deleteFile('/output.mp4');
-            } catch (e) {
-                // Ignore if doesn't exist
-            }
-        } catch (error) {
-            console.warn('Cleanup error:', error);
-        }
+    async drawFrameToCanvas(ctx, frameData, width, height) {
+        return new Promise((resolve, reject) => {
+            const img = new Image();
+            img.onload = () => {
+                ctx.drawImage(img, 0, 0, width, height);
+                resolve();
+            };
+            img.onerror = reject;
+            img.src = frameData;
+        });
     }
 
     /**
@@ -332,27 +186,24 @@ class VideoExporter {
      * Check if export is supported
      */
     static isSupported() {
-        const hasWebAssembly = typeof WebAssembly !== 'undefined';
-        const hasFFmpeg = typeof FFmpeg !== 'undefined' || typeof FFmpegWASM !== 'undefined';
-        
-        console.log('Export support check:', {
-            webAssembly: hasWebAssembly,
-            ffmpeg: hasFFmpeg
-        });
-        
-        return hasWebAssembly && hasFFmpeg;
+        return typeof MediaRecorder !== 'undefined';
     }
 
     /**
      * Get detailed support info
      */
     static getSupportInfo() {
+        const hasMediaRecorder = typeof MediaRecorder !== 'undefined';
+        let supportedTypes = [];
+        
+        if (hasMediaRecorder) {
+            const types = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm', 'video/mp4'];
+            supportedTypes = types.filter(t => MediaRecorder.isTypeSupported(t));
+        }
+        
         return {
-            webAssembly: typeof WebAssembly !== 'undefined',
-            ffmpeg: typeof FFmpeg !== 'undefined',
-            ffmpegWASM: typeof FFmpegWASM !== 'undefined',
-            ffmpegVersion: typeof FFmpeg !== 'undefined' ? (FFmpeg.version || 'unknown') : 
-                          typeof FFmpegWASM !== 'undefined' ? 'loaded (UMD)' : 'not loaded'
+            mediaRecorder: hasMediaRecorder,
+            supportedTypes: supportedTypes
         };
     }
 }

@@ -4,7 +4,7 @@
  */
 class App {
     // Version info
-    static VERSION = '1.0.1';
+    static VERSION = '1.1.0';
     static BUILD_DATE = '2025-08-20';
     
     constructor() {
@@ -213,17 +213,17 @@ class App {
             );
         }
         
-        // Check FFmpeg support
+        // Check export support
         const supportInfo = VideoExporter.getSupportInfo();
-        console.log('FFmpeg support info:', supportInfo);
+        console.log('Export support info:', supportInfo);
         
         if (!VideoExporter.isSupported()) {
-            if (!supportInfo.ffmpeg && !supportInfo.ffmpegWASM) {
-                this.showToast(
-                    'Video export requires FFmpeg.wasm. Check your internet connection.',
-                    'warning'
-                );
-            }
+            this.showToast(
+                'Video export not supported in this browser.',
+                'warning'
+            );
+        } else {
+            console.log('Supported video types:', supportInfo.supportedTypes);
         }
     }
 
@@ -480,18 +480,12 @@ class App {
             return;
         }
         
-        // Check export support with detailed info
+        // Check export support
         const supportInfo = VideoExporter.getSupportInfo();
         console.log('Export support info:', supportInfo);
         
         if (!VideoExporter.isSupported()) {
-            let errorMsg = 'Video export not supported: ';
-            if (!supportInfo.webAssembly) {
-                errorMsg += 'WebAssembly not available. ';            }
-            if (!supportInfo.ffmpeg) {
-                errorMsg += 'FFmpeg.wasm not loaded (check internet connection). ';
-            }
-            this.showToast(errorMsg, 'error');
+            this.showToast('Video export not supported in this browser.', 'error');
             return;
         }
         
@@ -571,10 +565,14 @@ class App {
         // Create video URL
         const videoUrl = URL.createObjectURL(videoBlob);
         
+        // Determine file extension based on mime type
+        const mimeType = videoBlob.type || 'video/webm';
+        const extension = mimeType.includes('mp4') ? 'mp4' : 'webm';
+        
         // Update UI
         this.elements.videoPreview.src = videoUrl;
         this.elements.downloadBtn.href = videoUrl;
-        this.elements.downloadBtn.download = `${title}.mp4`;
+        this.elements.downloadBtn.download = `${title}.${extension}`;
         
         // Show result section
         this.elements.exportResult.style.display = 'block';

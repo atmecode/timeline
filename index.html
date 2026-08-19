@@ -138,8 +138,8 @@
                 <h3>✅ Export Complete!</h3>
                 <video id="video-preview" controls class="video-preview"></video>
                 <div class="result-actions">
-                    <a id="download-btn" class="btn btn-primary" download="timeline-video.mp4">
-                        💾 Download MP4
+                    <a id="download-btn" class="btn btn-primary" download="timeline-video.webm">
+                        💾 Download Video
                     </a>
                     <button class="btn btn-secondary" id="new-video-btn">
                         🔄 Create Another
@@ -165,8 +165,8 @@
         </footer>
     </div>
 
-    <!-- Loading FFmpeg.wasm -->
-    <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.js"></script>
+    <!-- No external dependencies needed for video export -->
+    <!-- Using MediaRecorder API (built into browsers) -->
     
     <!-- Leaflet.js -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" 
