@@ -29,12 +29,17 @@ class VideoExporter {
         try {
             console.log('Loading FFmpeg.wasm...');
             
-            // Check for FFmpeg availability
-            if (typeof FFmpeg === 'undefined') {
+            // Check for FFmpeg availability (UMD exports to FFmpegWASM)
+            const FFmpegModule = typeof FFmpeg !== 'undefined' ? FFmpeg : 
+                                 typeof FFmpegWASM !== 'undefined' ? FFmpegWASM : null;
+            
+            if (!FFmpegModule) {
                 throw new Error('FFmpeg.wasm not loaded. Check your internet connection.');
             }
             
-            this.ffmpeg = new FFmpeg.FFmpeg();
+            // Get FFmpeg class from module
+            const FFmpegClass = FFmpegModule.FFmpeg || FFmpegModule;
+            this.ffmpeg = new FFmpegClass();
             
             // Set up progress handler
             this.ffmpeg.on('progress', ({ progress, time }) => {
@@ -47,10 +52,10 @@ class VideoExporter {
                 }
             });
             
-            // Load FFmpeg
+            // Load FFmpeg with core files
             await this.ffmpeg.load({
-                coreURL: 'https://unpkg.com/@ffmpeg/core@0.12.4/dist/umd/ffmpeg-core.js',
-                wasmURL: 'https://unpkg.com/@ffmpeg/core@0.12.4/dist/umd/ffmpeg-core.wasm'
+                coreURL: 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.js',
+                wasmURL: 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd/ffmpeg-core.wasm'
             });
             
             this.loaded = true;
@@ -328,7 +333,7 @@ class VideoExporter {
      */
     static isSupported() {
         const hasWebAssembly = typeof WebAssembly !== 'undefined';
-        const hasFFmpeg = typeof FFmpeg !== 'undefined';
+        const hasFFmpeg = typeof FFmpeg !== 'undefined' || typeof FFmpegWASM !== 'undefined';
         
         console.log('Export support check:', {
             webAssembly: hasWebAssembly,
@@ -345,7 +350,9 @@ class VideoExporter {
         return {
             webAssembly: typeof WebAssembly !== 'undefined',
             ffmpeg: typeof FFmpeg !== 'undefined',
-            ffmpegVersion: typeof FFmpeg !== 'undefined' ? (FFmpeg.version || 'unknown') : 'not loaded'
+            ffmpegWASM: typeof FFmpegWASM !== 'undefined',
+            ffmpegVersion: typeof FFmpeg !== 'undefined' ? (FFmpeg.version || 'unknown') : 
+                          typeof FFmpegWASM !== 'undefined' ? 'loaded (UMD)' : 'not loaded'
         };
     }
 }
