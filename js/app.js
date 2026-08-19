@@ -4,7 +4,7 @@
  */
 class App {
     // Version info
-    static VERSION = '1.3.0';
+    static VERSION = '1.3.1';
     static BUILD_DATE = '2025-08-20';
     
     constructor() {
@@ -398,6 +398,9 @@ class App {
      * Initialize map
      */
     initMap() {
+        // Show map section first
+        this.elements.mapSection.style.display = 'block';
+        
         if (!this.mapRenderer) {
             this.mapRenderer = new MapRenderer('map');
             this.mapRenderer.init();
@@ -413,7 +416,12 @@ class App {
             };
         }
         
-        this.elements.mapSection.style.display = 'block';
+        // Force map refresh after becoming visible
+        setTimeout(() => {
+            if (this.mapRenderer) {
+                this.mapRenderer.refresh();
+            }
+        }, 200);
     }
 
     /**
@@ -449,6 +457,10 @@ class App {
         
         // Show playback controls
         this.elements.playbackControls.style.display = 'flex';
+        
+        // Ensure map is properly rendered before starting
+        await new Promise(resolve => setTimeout(resolve, 300));
+        this.mapRenderer.refresh();
         
         // Start playback
         this.play();

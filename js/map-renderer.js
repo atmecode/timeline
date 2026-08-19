@@ -66,7 +66,11 @@ class MapRenderer {
         // Fit bounds to world view
         this.map.fitBounds([[-60, -180], [80, 180]]);
 
-        console.log('Map initialized');
+        // Force map to recalculate size (important for hidden containers)
+        setTimeout(() => {
+            this.map.invalidateSize();
+            console.log('Map initialized and resized');
+        }, 100);
     }
 
     /**
@@ -309,11 +313,23 @@ class MapRenderer {
     }
 
     /**
-     * Resize map (call after container resize)
+     * Resize map (call after container resize or visibility change)
      */
     resize() {
         if (this.map) {
             this.map.invalidateSize();
+            // Force tile reload
+            this.map.setView(this.map.getCenter(), this.map.getZoom());
+        }
+    }
+
+    /**
+     * Force map refresh - call after container becomes visible
+     */
+    refresh() {
+        if (this.map) {
+            this.map.invalidateSize();
+            this.map.setView(this.map.getCenter(), this.map.getZoom(), { animate: false });
         }
     }
 
