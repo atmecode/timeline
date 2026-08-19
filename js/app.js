@@ -4,7 +4,7 @@
  */
 class App {
     // Version info
-    static VERSION = '1.1.1';
+    static VERSION = '1.1.2';
     static BUILD_DATE = '2025-08-20';
     
     constructor() {
@@ -383,6 +383,15 @@ class App {
     }
 
     /**
+     * Scroll to element smoothly
+     */
+    scrollToElement(element) {
+        if (element) {
+            element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+    }
+
+    /**
      * Start preview
      */
     async startPreview() {
@@ -393,6 +402,9 @@ class App {
         
         // Initialize map if needed
         this.initMap();
+        
+        // Auto scroll to map
+        this.scrollToElement(this.elements.mapSection);
         
         // Get settings
         const duration = parseInt(this.elements.duration.value);
@@ -492,6 +504,9 @@ class App {
         // Initialize map if needed
         this.initMap();
         
+        // Auto scroll to map
+        this.scrollToElement(this.elements.mapSection);
+        
         // Get settings
         const duration = parseInt(this.elements.duration.value);
         const resolution = this.elements.resolution.value;
@@ -580,6 +595,9 @@ class App {
         
         // Hide playback controls
         this.elements.playbackControls.style.display = 'none';
+        
+        // Auto scroll to result
+        this.scrollToElement(this.elements.exportResult);
     }
 
     /**
