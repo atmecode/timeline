@@ -4,7 +4,7 @@
  */
 class App {
     // Version info
-    static VERSION = '1.1.3';
+    static VERSION = '1.1.4';
     static BUILD_DATE = '2025-08-20';
     
     constructor() {
