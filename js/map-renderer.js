@@ -95,73 +95,53 @@ class MapRenderer {
     }
 
     /**
-     * Draw complete route
+     * Initialize route (prepare for animation, don't draw yet)
      */
-    drawRoute(points, options = {}) {
-        const {
-            fitBounds = true,
-            animate = false
-        } = options;
+    initRoute(points, options = {}) {
+        const { fitBounds = true } = options;
 
         // Clear existing route
         this.clearRoute();
 
         if (points.length === 0) return;
 
-        // Convert points to LatLng array
-        const latLngs = points.map(p => [p.lat, p.lon]);
-
-        // Draw main route
-        const route = L.polyline(latLngs, this.routeStyle);
-        this.routeLayer.addLayer(route);
+        // Store points for progressive drawing
+        this.routePoints = points;
 
         // Fit map to route bounds
         if (fitBounds) {
+            const latLngs = points.map(p => [p.lat, p.lon]);
             const bounds = L.latLngBounds(latLngs);
             this.map.fitBounds(bounds, { padding: [50, 50] });
         }
 
-        // Add marker at start
-        this.marker.setLatLng(latLngs[0]);
+        // Add marker at start (hidden initially)
+        this.marker.setLatLng([points[0].lat, points[0].lon]);
         this.marker.addTo(this.map);
 
-        console.log(`Route drawn with ${points.length} points`);
+        console.log(`Route initialized with ${points.length} points`);
     }
 
     /**
-     * Update route animation progress
-     * @param {number} progress - Progress from 0 to 1
+     * Draw route progressively up to current progress
+     * @param {number} progress - 0 to 1
      * @param {Array} points - All route points
      */
-    updateProgress(progress, points) {
+    drawRouteProgress(progress, points) {
         if (!points || points.length === 0) return;
 
-        const index = Math.floor(progress * (points.length - 1));
-        const currentPoint = points[index];
-
-        // Update marker position
-        this.marker.setLatLng([currentPoint.lat, currentPoint.lon]);
-
-        // Update faded route (trail)
-        this.updateFadedRoute(points, index);
-
-        // Update camera to follow marker
-        this.followMarker(currentPoint);
-    }
-
-    /**
-     * Update the faded trail behind the marker
-     */
-    updateFadedRoute(points, currentIndex) {
-        // Clear previous faded route
+        // Clear previous route
+        this.routeLayer.clearLayers();
         this.fadedRoute.clearLayers();
 
+        const currentIndex = Math.floor(progress * (points.length - 1));
+        
         if (currentIndex <= 0) return;
 
-        // Draw faded trail
+        // Draw trail (faded route behind marker)
         const trailPoints = points.slice(0, currentIndex + 1).map(p => [p.lat, p.lon]);
         
-        // Create gradient effect with multiple segments
+        // Create gradient effect
         const segmentSize = Math.max(1, Math.floor(trailPoints.length / 10));
         
         for (let i = 0; i < trailPoints.length - 1; i += segmentSize) {
@@ -170,16 +150,43 @@ class MapRenderer {
             
             if (segment.length < 2) continue;
             
-            // Calculate opacity based on position (newer = more opaque)
+            // Newer segments are more opaque
             const segmentProgress = i / trailPoints.length;
-            const opacity = 0.1 + (segmentProgress * 0.3);
+            const opacity = 0.2 + (segmentProgress * 0.6);
             
             const polyline = L.polyline(segment, {
-                ...this.fadedStyle,
-                opacity: opacity
+                color: '#ff0055',
+                weight: 3,
+                opacity: opacity,
+                lineCap: 'round',
+                lineJoin: 'round'
             });
             
-            this.fadedRoute.addLayer(polyline);
+            this.routeLayer.addLayer(polyline);
+        }
+
+        // Draw current position marker
+        if (currentIndex < points.length) {
+            const currentPoint = points[currentIndex];
+            this.marker.setLatLng([currentPoint.lat, currentPoint.lon]);
+        }
+    }
+
+    /**
+     * Update route animation progress (progressive drawing)
+     * @param {number} progress - Progress from 0 to 1
+     * @param {Array} points - All route points
+     */
+    updateProgress(progress, points) {
+        if (!points || points.length === 0) return;
+
+        // Draw route progressively
+        this.drawRouteProgress(progress, points);
+
+        // Update camera to follow marker
+        const index = Math.floor(progress * (points.length - 1));
+        if (index < points.length) {
+            this.followMarker(points[index]);
         }
     }
 

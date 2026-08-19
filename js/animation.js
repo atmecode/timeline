@@ -49,8 +49,8 @@ class AnimationEngine {
         // Pre-calculate interpolated points for smooth animation
         this.preCalculateInterpolation();
         
-        // Update map
-        this.map.drawRoute(points, { fitBounds: true });
+        // Initialize route (don't draw yet, will be drawn progressively)
+        this.map.initRoute(points, { fitBounds: true });
         
         console.log(`Animation set: ${points.length} points, ${durationSeconds}s duration`);
     }
