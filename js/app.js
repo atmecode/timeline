@@ -208,6 +208,19 @@ class App {
                 'warning'
             );
         }
+        
+        // Check FFmpeg support
+        if (!VideoExporter.isSupported()) {
+            const supportInfo = VideoExporter.getSupportInfo();
+            console.warn('FFmpeg support info:', supportInfo);
+            
+            if (!supportInfo.ffmpeg) {
+                this.showToast(
+                    'Video export requires FFmpeg.wasm. Check your internet connection.',
+                    'warning'
+                );
+            }
+        }
     }
 
     /**
@@ -457,9 +470,18 @@ class App {
             return;
         }
         
-        // Check export support
+        // Check export support with detailed info
+        const supportInfo = VideoExporter.getSupportInfo();
+        console.log('Export support info:', supportInfo);
+        
         if (!VideoExporter.isSupported()) {
-            this.showToast('Video export not supported in this browser', 'error');
+            let errorMsg = 'Video export not supported: ';
+            if (!supportInfo.webAssembly) {
+                errorMsg += 'WebAssembly not available. ';            }
+            if (!supportInfo.ffmpeg) {
+                errorMsg += 'FFmpeg.wasm not loaded (check internet connection). ';
+            }
+            this.showToast(errorMsg, 'error');
             return;
         }
         

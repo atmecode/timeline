@@ -327,7 +327,26 @@ class VideoExporter {
      * Check if export is supported
      */
     static isSupported() {
-        return typeof WebAssembly !== 'undefined' && typeof FFmpeg !== 'undefined';
+        const hasWebAssembly = typeof WebAssembly !== 'undefined';
+        const hasFFmpeg = typeof FFmpeg !== 'undefined';
+        
+        console.log('Export support check:', {
+            webAssembly: hasWebAssembly,
+            ffmpeg: hasFFmpeg
+        });
+        
+        return hasWebAssembly && hasFFmpeg;
+    }
+
+    /**
+     * Get detailed support info
+     */
+    static getSupportInfo() {
+        return {
+            webAssembly: typeof WebAssembly !== 'undefined',
+            ffmpeg: typeof FFmpeg !== 'undefined',
+            ffmpegVersion: typeof FFmpeg !== 'undefined' ? (FFmpeg.version || 'unknown') : 'not loaded'
+        };
     }
 }
 
