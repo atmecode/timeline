@@ -210,11 +210,11 @@ class App {
         }
         
         // Check FFmpeg support
+        const supportInfo = VideoExporter.getSupportInfo();
+        console.log('FFmpeg support info:', supportInfo);
+        
         if (!VideoExporter.isSupported()) {
-            const supportInfo = VideoExporter.getSupportInfo();
-            console.warn('FFmpeg support info:', supportInfo);
-            
-            if (!supportInfo.ffmpeg) {
+            if (!supportInfo.ffmpeg && !supportInfo.ffmpegWASM) {
                 this.showToast(
                     'Video export requires FFmpeg.wasm. Check your internet connection.',
                     'warning'
