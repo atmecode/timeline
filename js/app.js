@@ -4,7 +4,7 @@
  */
 class App {
     // Version info
-    static VERSION = '1.1.2';
+    static VERSION = '1.1.3';
     static BUILD_DATE = '2025-08-20';
     
     constructor() {
@@ -358,6 +358,11 @@ class App {
     showSettings() {
         this.elements.settingsSection.style.display = 'block';
         this.elements.settingsSection.classList.add('fade-in');
+        
+        // Auto-select resolution based on device tier
+        const optimalResolution = this.memoryManager.config.resolution;
+        this.elements.resolution.value = optimalResolution;
+        console.log('Auto-selected resolution:', optimalResolution);
     }
 
     /**
