@@ -4,7 +4,7 @@
  */
 class App {
     // Version info
-    static VERSION = '1.4.0';
+    static VERSION = '1.4.1';
     static BUILD_DATE = '2025-08-20';
     
     constructor() {
@@ -94,7 +94,8 @@ class App {
             progressPercent: document.getElementById('progress-percent'),
             cancelBtn: document.getElementById('cancel-btn'),
             
-            // Playback controls
+            // Playback section & controls
+            playbackSection: document.getElementById('playback-section'),
             playbackControls: document.getElementById('playback-controls'),
             playBtn: document.getElementById('play-btn'),
             pauseBtn: document.getElementById('pause-btn'),
@@ -455,8 +456,8 @@ class App {
         // Set animation data
         this.animation.setData(this.parsedPoints, duration);
         
-        // Show playback controls
-        this.elements.playbackControls.style.display = 'flex';
+        // Show playback section
+        this.elements.playbackSection.style.display = 'block';
         
         // Ensure map is properly rendered before starting
         await new Promise(resolve => setTimeout(resolve, 300));
@@ -636,8 +637,8 @@ class App {
         this.elements.exportResult.style.display = 'block';
         this.elements.exportResult.classList.add('fade-in');
         
-        // Hide playback controls
-        this.elements.playbackControls.style.display = 'none';
+        // Hide playback section
+        this.elements.playbackSection.style.display = 'none';
         
         // Auto scroll to result
         this.scrollToElement(this.elements.exportResult);
@@ -655,7 +656,7 @@ class App {
         // Hide sections
         this.elements.settingsSection.style.display = 'none';
         this.elements.mapSection.style.display = 'none';
-        this.elements.playbackControls.style.display = 'none';
+        this.elements.playbackSection.style.display = 'none';
         this.elements.exportResult.style.display = 'none';
         
         // Show upload

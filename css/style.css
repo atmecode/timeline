@@ -440,19 +440,20 @@ body {
     font-size: 1.2rem;
 }
 
-/* === Playback Controls === */
-.playback-controls {
-    position: absolute;
-    bottom: 20px;
-    left: 20px;
-    right: 20px;
-    background: rgba(22, 33, 62, 0.95);
+/* === Playback Section === */
+.playback-section {
+    background: var(--surface);
     border-radius: var(--radius);
     padding: 15px 20px;
+    margin-bottom: 30px;
+    box-shadow: var(--shadow);
+}
+
+/* === Playback Controls === */
+.playback-controls {
     display: flex;
     align-items: center;
     gap: 15px;
-    z-index: 100;
 }
 
 .timeline-slider {
