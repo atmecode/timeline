@@ -4,7 +4,7 @@
  */
 class App {
     // Version info
-    static VERSION = '2.2.0';
+    static VERSION = '2.2.1';
     static BUILD_DATE = '2025-08-20';
     
     constructor() {
@@ -693,6 +693,9 @@ class App {
         this.showProgress('Preparing video export...');
         
         try {
+            // Track export start time for ETA
+            const exportStartTime = Date.now();
+
             // Create frame renderer - draws directly to canvas
             const frameRenderer = async (ctx, progress, width, height) => {
                 // Update animation to frame position
@@ -709,16 +712,18 @@ class App {
                 );
             };
             
-            // Set up progress callback
+            // Set up progress callback with ETA
             this.exporter.onProgress = (data) => {
                 const percent = Math.round(data.progress * 100);
                 const stageText = {
-                    'recording': 'Recording',
-                    'converting': 'Converting to MP4',
-                    'finalizing': 'Finalizing'
+                    'recording': '🎬 Recording',
+                    'converting': '🔄 Converting to MP4',
+                    'finalizing': '✅ Finalizing'
                 }[data.stage] || data.stage;
+
+                const eta = this.calculateETA(data.progress, exportStartTime);
                 this.updateProgress(
-                    `${stageText}: ${percent}%`,
+                    `${stageText}: ${percent}%  •  ${eta}`,
                     percent
                 );
             };
