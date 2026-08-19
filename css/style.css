@@ -301,6 +301,52 @@ body {
     flex-wrap: wrap;
 }
 
+/* === Duration Input === */
+.duration-input-group {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.duration-input {
+    width: 100px;
+    text-align: center;
+}
+
+.duration-unit {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+.duration-presets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.preset-btn {
+    padding: 6px 12px;
+    border: 2px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--surface-light);
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.preset-btn:hover {
+    border-color: var(--primary-color);
+    color: var(--text-primary);
+}
+
+.preset-btn.active {
+    border-color: var(--primary-color);
+    background: var(--primary-color);
+    color: white;
+}
+
 /* === Map Section === */
 .map-section {
     position: relative;
@@ -580,6 +626,16 @@ body {
         width: 100%;
         text-align: center;
         min-width: auto;
+    }
+
+    /* Duration */
+    .duration-presets {
+        gap: 6px;
+    }
+
+    .preset-btn {
+        padding: 8px 10px;
+        font-size: 0.8rem;
     }
 
     /* Actions */

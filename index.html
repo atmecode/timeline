@@ -61,9 +61,20 @@
 
                 <!-- Duration -->
                 <div class="setting-group">
-                    <label for="duration">⏱️ Duration (seconds)</label>
-                    <input type="range" id="duration" min="10" max="300" value="60" class="slider">
-                    <span id="duration-value" class="slider-value">60s</span>
+                    <label for="duration">⏱️ Duration</label>
+                    <div class="duration-input-group">
+                        <input type="number" id="duration" min="10" max="300" value="60" class="input duration-input">
+                        <span class="duration-unit">seconds</span>
+                    </div>
+                    <div class="duration-presets">
+                        <button type="button" class="preset-btn" data-duration="15">15s</button>
+                        <button type="button" class="preset-btn" data-duration="30">30s</button>
+                        <button type="button" class="preset-btn active" data-duration="60">60s</button>
+                        <button type="button" class="preset-btn" data-duration="90">90s</button>
+                        <button type="button" class="preset-btn" data-duration="120">2m</button>
+                        <button type="button" class="preset-btn" data-duration="180">3m</button>
+                        <button type="button" class="preset-btn" data-duration="300">5m</button>
+                    </div>
                 </div>
 
                 <!-- Resolution -->

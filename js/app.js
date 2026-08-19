@@ -4,7 +4,7 @@
  */
 class App {
     // Version info
-    static VERSION = '1.1.4';
+    static VERSION = '1.2.0';
     static BUILD_DATE = '2025-08-20';
     
     constructor() {
@@ -151,9 +151,19 @@ class App {
             }
         });
         
-        // Duration slider
+        // Duration input
         this.elements.duration.addEventListener('input', (e) => {
-            this.elements.durationValue.textContent = `${e.target.value}s`;
+            this.updateDurationPreset(parseInt(e.target.value));
+        });
+        
+        // Duration preset buttons
+        document.querySelectorAll('.preset-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                const duration = parseInt(btn.dataset.duration);
+                this.elements.duration.value = duration;
+                this.updateDurationPreset(duration);
+            });
         });
         
         // Action buttons
@@ -363,6 +373,19 @@ class App {
         const optimalResolution = this.memoryManager.config.resolution;
         this.elements.resolution.value = optimalResolution;
         console.log('Auto-selected resolution:', optimalResolution);
+        
+        // Set initial duration preset
+        this.updateDurationPreset(parseInt(this.elements.duration.value));
+    }
+
+    /**
+     * Update duration preset button active state
+     */
+    updateDurationPreset(value) {
+        document.querySelectorAll('.preset-btn').forEach(btn => {
+            const btnValue = parseInt(btn.dataset.duration);
+            btn.classList.toggle('active', btnValue === value);
+        });
     }
 
     /**
